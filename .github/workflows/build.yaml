@@ -34,8 +34,11 @@ jobs:
           # - Specify the same as `NUGET_PACKAGES`
           path: |
             ${{ github.workspace }}/.nuget/packages
+            ${{ github.workspace }}/PandoraPlus/bin
             ${{ github.workspace }}/PandoraPlus/obj
+            ${{ github.workspace }}/third_party/HKX2-Library/HKX2 WPF/bin
             ${{ github.workspace }}/third_party/HKX2-Library/HKX2 WPF/obj
+            ${{ github.workspace }}/third_party/XML-Cake/XML Cake/bin
             ${{ github.workspace }}/third_party/XML-Cake/XML Cake/obj
 
           key: nuget-${{ runner.os }}-${{ matrix.dotnet-version }}
