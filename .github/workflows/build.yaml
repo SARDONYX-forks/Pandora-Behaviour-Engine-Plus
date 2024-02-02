@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["main"]
 
+env:
+  build-mode: Debug # Release | Debug
+
 jobs:
   build:
     runs-on: windows-latest
@@ -24,11 +27,11 @@ jobs:
           dotnet-version: ${{ matrix.dotnet-version }}
 
       - name: Build
-        run: dotnet build "./PandoraPlus.sln"
+        run: dotnet build "./PandoraPlus.sln" --configuration ${{ env.build-mode }}
 
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Pandora.Behaviour.Engine
           path: |
-            ./PandoraPlus/bin
+            ./PandoraPlus/bin/${{ env.build-mode }}/net7.0-windows
