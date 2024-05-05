@@ -1,74 +1,75 @@
-﻿using NLog;
-using Pandora.Core;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using NLog;
+using Pandora.Core;
+using ChangeType = Pandora.Patch.Patchers.Skyrim.Hkx.IPackFileChange.ChangeType;
 
 namespace Pandora.Patch.Patchers.Skyrim.Hkx;
-using ChangeType = IPackFileChange.ChangeType;
-
 public class PackFileChangeSet
 {
-	private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-	private Dictionary<ChangeType, List<IPackFileChange>> changes = new Dictionary<ChangeType, List<IPackFileChange>>();
+    private readonly Dictionary<ChangeType, List<IPackFileChange>> changes = new();
 
-	private static readonly IOrderedEnumerable<ChangeType> orderedChangeTypes = Enum.GetValues(typeof(ChangeType)).Cast<ChangeType>().OrderBy(t => t);
+    private static readonly IOrderedEnumerable<ChangeType> orderedChangeTypes = Enum.GetValues(typeof(ChangeType)).Cast<ChangeType>().OrderBy(t => t);
 
-	public IModInfo Origin { get; set; }
+    public IModInfo Origin { get; set; }
 
-	public PackFileChangeSet(IModInfo modInfo)
-	{
-		foreach (ChangeType changeType in orderedChangeTypes) { changes.Add(changeType, new List<IPackFileChange>()); }
-		Origin = modInfo;
-	}
+    public PackFileChangeSet(IModInfo modInfo)
+    {
+        foreach (ChangeType changeType in orderedChangeTypes) { this.changes.Add(changeType, new List<IPackFileChange>()); }
+        this.Origin = modInfo;
+    }
 
-	public PackFileChangeSet(PackFileChangeSet packFileChangeSet)
-	{
-		foreach (ChangeType changeType in orderedChangeTypes) { changes.Add(changeType, new List<IPackFileChange>()); }
-		Origin = packFileChangeSet.Origin;
-	}
+    public PackFileChangeSet(PackFileChangeSet packFileChangeSet)
+    {
+        foreach (ChangeType changeType in orderedChangeTypes) { this.changes.Add(changeType, new List<IPackFileChange>()); }
+        this.Origin = packFileChangeSet.Origin;
+    }
 
-	public void AddChange(IPackFileChange change) => changes[change.Type].Add(change);
-	public static void ApplyInOrder(PackFile packFile, List<PackFileChangeSet> changeSetList)
-	{
-		foreach(ChangeType changeType in orderedChangeTypes)
-		{
-			foreach(var changeSet in changeSetList)
-			{
-				changeSet.ApplyForType(packFile, changeType);
-			}
-		}
-	}
+    public void AddChange(IPackFileChange change)
+    {
+        this.changes[change.Type].Add(change);
+    }
 
-	public void ApplyForType(PackFile packFile, ChangeType changeType)
-	{
-		var changeList = changes[changeType];
-		foreach (var change in changeList)
-		{
-			if (!change.Apply(packFile)) { Logger.Warn($"Dispatcher > \"{Origin.Name}\" > {packFile.ParentProject?.Identifier}~{packFile.Name} > {change.Type} > {change.AssociatedType} > {change.Path} > FAILED"); }
-		}
-	}
-	public void Apply(PackFile packFile)
-	{
-		foreach (ChangeType changeType in orderedChangeTypes)
-		{
-			var changeList = changes[changeType]; 
-			foreach(var change in changeList) 
-			{ 
-				if (!change.Apply(packFile)) { Logger.Warn($"Dispatcher > \"{Origin.Name}\" > {packFile.ParentProject?.Identifier}~{packFile.Name} > {change.Type} > {change.AssociatedType} > {change.Path} > FAILED"); }
-			}
-		}
+    public static void ApplyInOrder(PackFile packFile, List<PackFileChangeSet> changeSetList)
+    {
+        foreach (ChangeType changeType in orderedChangeTypes)
+        {
+            foreach (PackFileChangeSet changeSet in changeSetList)
+            {
+                changeSet.ApplyForType(packFile, changeType);
+            }
+        }
+    }
 
-	}
+    public void ApplyForType(PackFile packFile, ChangeType changeType)
+    {
+        List<IPackFileChange> changeList = this.changes[changeType];
+        foreach (IPackFileChange change in changeList)
+        {
+            if (!change.Apply(packFile)) { Logger.Warn($"Dispatcher > \"{this.Origin.Name}\" > {packFile.ParentProject?.Identifier}~{packFile.Name} > {change.Type} > {change.AssociatedType} > {change.Path} > FAILED"); }
+        }
+    }
+    public void Apply(PackFile packFile)
+    {
+        foreach (ChangeType changeType in orderedChangeTypes)
+        {
+            List<IPackFileChange> changeList = this.changes[changeType];
+            foreach (IPackFileChange change in changeList)
+            {
+                if (!change.Apply(packFile)) { Logger.Warn($"Dispatcher > \"{this.Origin.Name}\" > {packFile.ParentProject?.Identifier}~{packFile.Name} > {change.Type} > {change.AssociatedType} > {change.Path} > FAILED"); }
+            }
+        }
 
-	public void Validate(PackFile packFile, PackFileValidator validator)
-	{
-		foreach (ChangeType changeType in orderedChangeTypes)
-		{
-			validator.Validate(packFile, changes[changeType]);
-		}
-	}
+    }
+
+    public void Validate(PackFile packFile, PackFileValidator validator)
+    {
+        foreach (ChangeType changeType in orderedChangeTypes)
+        {
+            validator.Validate(packFile, this.changes[changeType]);
+        }
+    }
 }

@@ -1,195 +1,187 @@
-﻿using Pandora.Core.Patchers.Skyrim;
-using Pandora.Patch.Patchers.Skyrim.Hkx;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using Pandora.Core.Patchers.Skyrim;
 
-namespace Pandora.Patch.Patchers.Skyrim.AnimData
+namespace Pandora.Patch.Patchers.Skyrim.AnimData;
+
+public class AnimDataManager
 {
-	public class AnimDataManager
-	{
 
-		private static readonly string ANIMDATA_FILENAME = "animationdatasinglefile.txt";
+    private static readonly string ANIMDATA_FILENAME = "animationdatasinglefile.txt";
 
-		private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+    private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
 
-		private HashSet<int> usedClipIDs = new HashSet<int>();
-		public int numClipIDs { get; private set; } = 0;
+    private readonly HashSet<int> usedClipIDs = new();
+    public int numClipIDs { get; private set; } = 0;
 
-		private List<string> projectNames = new List<string>();
-		private Dictionary<string, Dictionary<int, int>> MotionBlockIndexes { get; set; } = new Dictionary<string, Dictionary<int, int>>();
-		private List<ProjectAnimData> animDataList { get; set; } = new List<ProjectAnimData>();
-		private List<MotionData> motionDataList { get; set; } = new List<MotionData>();
+    private readonly List<string> projectNames = new();
 
-		private DirectoryInfo templateFolder;
-		private DirectoryInfo outputFolder; 
+    private List<ProjectAnimData> animDataList { get; set; } = new List<ProjectAnimData>();
+    private List<MotionData> motionDataList { get; set; } = new List<MotionData>();
 
-		private FileInfo templateAnimDataSingleFile { get; set; }
+    private readonly DirectoryInfo templateFolder;
+    private readonly DirectoryInfo outputFolder;
 
-		private FileInfo outputAnimDataSingleFile { get; set; }
+    private FileInfo templateAnimDataSingleFile { get; set; }
 
+    private FileInfo outputAnimDataSingleFile { get; set; }
 
-		private int LastID { get; set; } = 32767;
+    private int LastID { get; set; } = 32767;
 
-        public AnimDataManager(DirectoryInfo templateFolder, DirectoryInfo outputFolder)
+    public AnimDataManager(DirectoryInfo templateFolder, DirectoryInfo outputFolder)
+    {
+        this.templateFolder = templateFolder;
+        this.outputFolder = outputFolder;
+        this.templateAnimDataSingleFile = new FileInfo($"{templateFolder.FullName}\\{ANIMDATA_FILENAME}");
+        this.outputAnimDataSingleFile = new FileInfo($"{outputFolder.FullName}\\{ANIMDATA_FILENAME}");
+    }
+
+    private void MapProjectAnimData(ProjectAnimData animData)
+    {
+        foreach (ClipDataBlock block in animData.Blocks)
         {
-			this.templateFolder = templateFolder;
-			this.outputFolder = outputFolder;
-            templateAnimDataSingleFile = new FileInfo($"{templateFolder.FullName}\\{ANIMDATA_FILENAME}");
-			outputAnimDataSingleFile = new FileInfo($"{outputFolder.FullName}\\{ANIMDATA_FILENAME}");
-		}
+            _ = this.usedClipIDs.Add(int.Parse(block.ClipID));
+        }
+    }
 
-		private void MapProjectAnimData(ProjectAnimData animData)
-		{
-			foreach (ClipDataBlock block in animData.Blocks)
-			{
-				usedClipIDs.Add(Int32.Parse(block.ClipID));
-			}
-		}
+    private void MapAnimData()
+    {
+        foreach (ProjectAnimData animData in this.animDataList)
+        {
+            this.MapProjectAnimData(animData);
+        }
+    }
 
-		private void MapAnimData()
-		{
-			foreach (ProjectAnimData animData in animDataList)
-			{
-				MapProjectAnimData(animData);
-			}
-		}
+    public int GetNextValidID()
+    {
+        while (this.usedClipIDs.Contains(this.LastID))
+        {
+            this.LastID--;
+        }
+        _ = this.usedClipIDs.Add(this.LastID);
+        return this.LastID;
+    }
 
-		public int GetNextValidID()
-		{
-			while (usedClipIDs.Contains(LastID))
-			{
-				LastID--;
-			}
-			usedClipIDs.Add(LastID);
-			return LastID;
-		}
-		
-		public void SplitAnimationDataSingleFile(ProjectManager projectManager)
-		{
-			LastID = 32767;
+    public void SplitAnimationDataSingleFile(ProjectManager projectManager)
+    {
+        this.LastID = 32767;
 
-			int NumProjects;
+        int NumProjects;
 
+        using (FileStream readStream = this.templateAnimDataSingleFile.OpenRead())
+        {
+            using StreamReader reader = new(readStream);
+            string? expectedLine;
+            int projectIndex = 0;
+            int sectionIndex = 0;
+            NumProjects = int.Parse(reader.ReadLine()!);
+            Project? activeProject = null;
+            ProjectAnimData? animData = null;
+            MotionData motionData;
+            while ((expectedLine = reader.ReadLine()) != null)
+            {
 
-			using (var readStream = templateAnimDataSingleFile.OpenRead())
-			{
-				using (StreamReader reader = new StreamReader(readStream))
-				{
-					string? expectedLine;
-					int numLines; 
-					int projectIndex = 0;
-					int sectionIndex = 0;
-					NumProjects = Int32.Parse(reader.ReadLine()!);
-					Project? activeProject = null;
-					ProjectAnimData? animData = null;
-					MotionData motionData;
-					while ((expectedLine = reader.ReadLine()) != null)
-					{
-						
-						if (expectedLine.Contains(".txt"))
-						{
-							projectNames.Add(Path.GetFileNameWithoutExtension(expectedLine));
+                if (expectedLine.Contains(".txt"))
+                {
+                    this.projectNames.Add(Path.GetFileNameWithoutExtension(expectedLine));
 
-						}
-						else if (Int32.TryParse(expectedLine, out numLines))
-						{
-							string projectName = projectNames[projectIndex].ToLower();
-							if (projectManager.ProjectLoaded(projectName)) activeProject = projectManager.LookupProject(projectName);
-							sectionIndex++;
+                }
+                else if (int.TryParse(expectedLine, out int numLines))
+                {
+                    string projectName = this.projectNames[projectIndex].ToLower();
+                    if (projectManager.ProjectLoaded(projectName))
+                    {
+                        activeProject = projectManager.LookupProject(projectName);
+                    }
 
+                    sectionIndex++;
 
-							if (sectionIndex % 2 != 0)
-							{
+                    if (sectionIndex % 2 != 0)
+                    {
 
-								//using (StreamWriter writer = new StreamWriter(OutputFolder + "\\" + ProjectOrder[i]))
-								//{
+                        //using (StreamWriter writer = new StreamWriter(OutputFolder + "\\" + ProjectOrder[i]))
+                        //{
 
-								animData = ProjectAnimData.ReadProject(reader, numLines, this);
+                        animData = ProjectAnimData.ReadProject(reader, numLines, this);
 #if DEBUG
-								//var outputFile = new FileInfo(AnimDataProjectOutputFolder.FullName + $"\\{ProjectNames[projectIndex]}");
-								//if (outputFile.Exists) outputFile.Delete();
-								//using (var outputWriteStream = outputFile.OpenWrite())
-								//{
-								//	using (var writer = new StreamWriter(outputWriteStream))
-								//	{
-								//		writer.Write(animData.ToString());
-								//	}
-								//}
+                        //var outputFile = new FileInfo(AnimDataProjectOutputFolder.FullName + $"\\{ProjectNames[projectIndex]}");
+                        //if (outputFile.Exists) outputFile.Delete();
+                        //using (var outputWriteStream = outputFile.OpenWrite())
+                        //{
+                        //	using (var writer = new StreamWriter(outputWriteStream))
+                        //	{
+                        //		writer.Write(animData.ToString());
+                        //	}
+                        //}
 #endif
-								if (animData.Header.HasMotionData == 0)
-								{
-									projectIndex++;
-									sectionIndex++;
-								}
-								animDataList.Add(animData);
-								if (activeProject != null)
-								{
-									activeProject.AnimData = animData;
-								}
+                        if (animData.Header.HasMotionData == 0)
+                        {
+                            projectIndex++;
+                            sectionIndex++;
+                        }
+                        this.animDataList.Add(animData);
+                        if (activeProject != null)
+                        {
+                            activeProject.AnimData = animData;
+                        }
 
-								//writer.Write(project.ToString());
-								//}
-							}
-							else
-							{
+                        //writer.Write(project.ToString());
+                        //}
+                    }
+                    else
+                    {
 
-								motionData = MotionData.ReadProject(reader, numLines);
-								if (animData != null) animData.BoundMotionDataProject = motionData;
+                        motionData = MotionData.ReadProject(reader, numLines);
+                        if (animData != null)
+                        {
+                            animData.BoundMotionDataProject = motionData;
+                        }
 
-
-								motionDataList.Add(motionData);
+                        this.motionDataList.Add(motionData);
 #if DEBUG
-								//var outputFile = new FileInfo(MotionDataProjectOutputFolder.FullName + $"\\{ProjectNames[projectIndex]}");
-								//if (outputFile.Exists) outputFile.Delete();
-								//using (var outputWriteStream = outputFile.OpenWrite())
-								//{
-								//	using (var writer = new StreamWriter(outputWriteStream))
-								//	{
-								//		writer.Write(motionData.ToString());
-								//	}
-								//}
+                        //var outputFile = new FileInfo(MotionDataProjectOutputFolder.FullName + $"\\{ProjectNames[projectIndex]}");
+                        //if (outputFile.Exists) outputFile.Delete();
+                        //using (var outputWriteStream = outputFile.OpenWrite())
+                        //{
+                        //	using (var writer = new StreamWriter(outputWriteStream))
+                        //	{
+                        //		writer.Write(motionData.ToString());
+                        //	}
+                        //}
 #endif
-								projectIndex++;
-							}
-						}
-					}
-				}
-			}
-			MapAnimData();
-		}
+                        projectIndex++;
+                    }
+                }
+            }
+        }
+        this.MapAnimData();
+    }
 
-		public void MergeAnimDataSingleFile()
-		{
-			if (outputAnimDataSingleFile.Exists) { outputAnimDataSingleFile.Delete(); }
+    public void MergeAnimDataSingleFile()
+    {
+        if (this.outputAnimDataSingleFile.Exists) { this.outputAnimDataSingleFile.Delete(); }
 
+        using FileStream writeStream = this.outputAnimDataSingleFile.OpenWrite();
+        using StreamWriter streamWriter = new(writeStream);
+        streamWriter.WriteLine(this.projectNames.Count);
+        foreach (string projectName in this.projectNames) { streamWriter.WriteLine($"{projectName}.txt"); }
 
-			using (var writeStream = outputAnimDataSingleFile.OpenWrite())
-			{
-				using (var streamWriter =  new StreamWriter(writeStream))
-				{
-					streamWriter.WriteLine(projectNames.Count);
-					foreach(var projectName in projectNames) { streamWriter.WriteLine($"{projectName}.txt"); }
+        for (int i = 0; i < this.projectNames.Count; i++)
+        {
+            ProjectAnimData animData = this.animDataList[i];
+            MotionData? motionData = animData.BoundMotionDataProject;
 
-					for(int i = 0;  i < projectNames.Count; i++)
-					{
-						var animData = animDataList[i];
-						var motionData = animData.BoundMotionDataProject;
+            streamWriter.WriteLine(animData.GetLineCount());
+            streamWriter.WriteLine(animData.ToString());
 
-						streamWriter.WriteLine(animData.GetLineCount());
-						streamWriter.WriteLine(animData.ToString());
+            if (motionData == null)
+            {
+                continue;
+            }
 
-						if (motionData == null) continue;
+            streamWriter.WriteLine(motionData.GetLineCount());
+            streamWriter.WriteLine(motionData.ToString());
+        }
 
-						streamWriter.WriteLine(motionData.GetLineCount());
-						streamWriter.WriteLine(motionData.ToString());
-					}
-				}
-			}
-
-		}
-	}
+    }
 }

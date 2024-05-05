@@ -1,42 +1,37 @@
-﻿using Pandora.Core;
-using System.Xml;
+﻿using System.Xml;
 using System.Xml.Linq;
 
-namespace Pandora.Patch.Patchers.Skyrim.Hkx
+namespace Pandora.Patch.Patchers.Skyrim.Hkx;
+
+public class ReplaceElementChange : IPackFileChange
 {
-	public class ReplaceElementChange : IPackFileChange
-	{
-		public IPackFileChange.ChangeType Type { get;  } = IPackFileChange.ChangeType.Replace;
+    public IPackFileChange.ChangeType Type { get; } = IPackFileChange.ChangeType.Replace;
 
-		public XmlNodeType AssociatedType { get;  } = XmlNodeType.Element;
+    public XmlNodeType AssociatedType { get; } = XmlNodeType.Element;
 
-		public string Path { get; private set; }
+    public string Path { get; private set; }
 
-		private XElement element { get; set; }
+    private XElement element { get; set; }
 
+    public ReplaceElementChange(string path, XElement element)
+    {
+        this.Path = path;
+        this.element = element;
 
+    }
+    public bool Apply(PackFile packFile)
+    {
+        if (!packFile.Map.PathExists(this.Path))
+        {
+            return false;
+        }
 
-		public ReplaceElementChange(string path, XElement element)
-		{
-			Path = path;
-			this.element = element;
-	
-		}
-		public bool Apply(PackFile packFile)
-		{
-			if (!packFile.Map.PathExists(Path)) return false;
-			element = PackFileEditor.ReplaceElement(packFile, Path, element);
-			return element != null; 
-		}
+        this.element = PackFileEditor.ReplaceElement(packFile, this.Path, this.element);
+        return this.element != null;
+    }
 
-		public bool Revert(PackFile packFile)
-		{
-			return Apply(packFile);
-		}
-	}
-
-
-
-
-
+    public bool Revert(PackFile packFile)
+    {
+        return this.Apply(packFile);
+    }
 }

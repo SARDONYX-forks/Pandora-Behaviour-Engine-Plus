@@ -1,78 +1,79 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using static Nito.HashAlgorithms.CRC32;
-namespace Pandora.Patch.Patchers.Skyrim.AnimSetData
+namespace Pandora.Patch.Patchers.Skyrim.AnimSetData;
+
+public static class BSCRC32
 {
-    public static class BSCRC32
-	{
-		public static Definition BSDefinition = new Definition
-		{
-			Initializer = 0,
-			TruncatedPolynomial = 0x04C11DB7,
-			FinalXorValue = 0,
-			ReverseResultBeforeFinalXor = true,
-			ReverseDataBytes = true
-		};
+    public static Definition BSDefinition = new()
+    {
+        Initializer = 0,
+        TruncatedPolynomial = 0x04C11DB7,
+        FinalXorValue = 0,
+        ReverseResultBeforeFinalXor = true,
+        ReverseDataBytes = true
+    };
 
-		public static byte[] GetValue(byte[] bytes)
-		{
+    public static byte[] GetValue(byte[] bytes)
+    {
 
-			using (var alg = new Nito.HashAlgorithms.CRC32(BSDefinition))
-			{
-				byte[] crc32 = alg.ComputeHash(bytes);
-				return crc32;
-			}
-		}
+        using Nito.HashAlgorithms.CRC32 alg = new(BSDefinition);
+        byte[] crc32 = alg.ComputeHash(bytes);
+        return crc32;
+    }
 
-		public static UInt32 GetValueUInt32(string str) => BitConverter.ToUInt32(GetValue(Encoding.ASCII.GetBytes(str)));
-		public static string GetValueString(string str) => GetValueUInt32(str).ToString();
-	}
-	public class SetCachedAnimInfo
-	{
+    public static uint GetValueUInt32(string str)
+    {
+        return BitConverter.ToUInt32(GetValue(Encoding.ASCII.GetBytes(str)));
+    }
 
-		public UInt32 encodedPath { get; private set; } = 3064642194; //vanilla actor animation folder path
+    public static string GetValueString(string str)
+    {
+        return GetValueUInt32(str).ToString();
+    }
+}
+public class SetCachedAnimInfo
+{
 
-		public UInt32 encodedFileName { get; private set; } = 0; //animation name in lowercase
+    public uint encodedPath { get; private set; } = 3064642194; //vanilla actor animation folder path
 
-		public UInt32 encodedExtension { get; private set; } = 7891816; //xkh
+    public uint encodedFileName { get; private set; } = 0; //animation name in lowercase
 
+    public uint encodedExtension { get; private set; } = 7891816; //xkh
 
-		public static SetCachedAnimInfo Read(StreamReader reader)
-		{
-			var animInfo = new SetCachedAnimInfo();
+    public static SetCachedAnimInfo Read(StreamReader reader)
+    {
+        SetCachedAnimInfo animInfo = new()
+        {
+            encodedPath = uint.Parse(reader.ReadLineSafe()),
+            encodedFileName = uint.Parse(reader.ReadLineSafe()),
+            encodedExtension = uint.Parse(reader.ReadLineSafe())
+        };
 
-			animInfo.encodedPath = UInt32.Parse(reader.ReadLineSafe());
-			animInfo.encodedFileName = UInt32.Parse(reader.ReadLineSafe());
-			animInfo.encodedExtension = UInt32.Parse(reader.ReadLineSafe());
+        return animInfo;
+    }
 
-			return animInfo;
-		}
+    public static SetCachedAnimInfo Encode(string folderPath, string fileName) //filename without extension
+    {
+        SetCachedAnimInfo animInfo = new()
+        {
+            encodedPath = BSCRC32.GetValueUInt32(folderPath.ToLower()),
+            encodedFileName = BSCRC32.GetValueUInt32(fileName.ToLower())
+        };
 
-		public static SetCachedAnimInfo Encode(string folderPath, string fileName) //filename without extension
-		{
-			var animInfo = new SetCachedAnimInfo();
+        return animInfo;
+    }
 
-			animInfo.encodedPath = BSCRC32.GetValueUInt32(folderPath.ToLower());
-			animInfo.encodedFileName = BSCRC32.GetValueUInt32(fileName.ToLower());
+    public override string ToString()
+    {
+        StringBuilder sb = new();
 
-			return animInfo;
-		}
+        _ = sb.AppendLine(this.encodedPath.ToString());
+        _ = sb.AppendLine(this.encodedFileName.ToString());
+        _ = sb.AppendLine(this.encodedExtension.ToString());
 
-		public override string ToString()
-		{
-			StringBuilder sb = new StringBuilder();
+        return sb.ToString();
+    }
 
-			sb.AppendLine(encodedPath.ToString());
-			sb.AppendLine(encodedFileName.ToString());
-			sb.AppendLine(encodedExtension.ToString());
-
-			return sb.ToString();
-		}
-
-
-	}
 }

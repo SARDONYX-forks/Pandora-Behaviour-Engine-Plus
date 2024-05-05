@@ -1,33 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+﻿using System.Windows.Controls;
 
-namespace Pandora.MVVM.View.Controls
+namespace Pandora.MVVM.View.Controls;
+
+/// <summary>
+/// Interaction logic for LogBox.xaml
+/// </summary>
+public partial class LogBox : UserControl
 {
-    /// <summary>
-    /// Interaction logic for LogBox.xaml
-    /// </summary>
-    public partial class LogBox : UserControl
+    public LogBox()
     {
-        public LogBox()
-        {
-            InitializeComponent();
-        }
+        this.InitializeComponent();
+    }
 
-		private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
-		{
-            LogTextBox.ScrollToEnd();
-        }
+    private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        this.LogTextBox.ScrollToEnd();
     }
 }

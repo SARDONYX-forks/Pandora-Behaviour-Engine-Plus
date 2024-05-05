@@ -1,91 +1,100 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace Pandora.Patch.Patchers.Skyrim.AnimSetData
+namespace Pandora.Patch.Patchers.Skyrim.AnimSetData;
+
+public class AnimSet
 {
-    public class AnimSet
-	{
-		public string VersionName { get; private set; } = "V3";
-		public int NumTriggers { get; private set; } = 0;
+    public string VersionName { get; private set; } = "V3";
+    public int NumTriggers { get; private set; } = 0;
 
-		public int NumConditions { get; private set; } = 0;
+    public int NumConditions { get; private set; } = 0;
 
-		public int NumAttackEntries { get; private set; } = 0;
+    public int NumAttackEntries { get; private set; } = 0;
 
-		public int NumAnimationInfos { get; private set; } = 0;
+    public int NumAnimationInfos { get; private set; } = 0;
 
-		public List<string> Triggers { get; private set; } = new List<string>();
+    public List<string> Triggers { get; private set; } = new List<string>();
 
-		public List<SetCondition> Conditions { get; private set; } = new List<SetCondition>();
+    public List<SetCondition> Conditions { get; private set; } = new List<SetCondition>();
 
-		public List<SetAttackEntry> AttackEntries { get; private set; } = new List<SetAttackEntry>();
+    public List<SetAttackEntry> AttackEntries { get; private set; } = new List<SetAttackEntry>();
 
-		public List<SetCachedAnimInfo> AnimInfos { get; private set; } = new List<SetCachedAnimInfo>();
+    public List<SetCachedAnimInfo> AnimInfos { get; private set; } = new List<SetCachedAnimInfo>();
 
-		public void AddAnimInfo(SetCachedAnimInfo animInfo) => AnimInfos.Add(animInfo);
+    public void AddAnimInfo(SetCachedAnimInfo animInfo)
+    {
+        this.AnimInfos.Add(animInfo);
+    }
 
-		public static AnimSet Read(StreamReader reader)
-		{
-			var animSet = new AnimSet();
+    public static AnimSet Read(StreamReader reader)
+    {
+        AnimSet animSet = new()
+        {
+            VersionName = reader.ReadLineSafe()
+        };
 
-			animSet.VersionName = reader.ReadLineSafe();
+        if (!int.TryParse(reader.ReadLineSafe(), out int numTriggers))
+        {
+            return animSet;
+        }
 
-			int numTriggers;
-			int numConditions;
-			int numAttacks;
-			int numAnimationInfos;
+        for (int i = 0; i < numTriggers; i++) { animSet.Triggers.Add(reader.ReadLineSafe()); }
 
-			if (!int.TryParse(reader.ReadLineSafe(), out numTriggers)) return animSet;
-			for (int i = 0; i < numTriggers; i++) { animSet.Triggers.Add(reader.ReadLineSafe()); }
+        if (!int.TryParse(reader.ReadLineSafe(), out int numConditions))
+        {
+            return animSet;
+        }
 
-			if (!int.TryParse(reader.ReadLineSafe(), out numConditions)) return animSet;
-			for (int i = 0; i < numConditions; i++) { animSet.Conditions.Add(SetCondition.ReadCondition(reader)); }
+        for (int i = 0; i < numConditions; i++) { animSet.Conditions.Add(SetCondition.ReadCondition(reader)); }
 
-			if (!int.TryParse(reader.ReadLineSafe(), out numAttacks)) return animSet;
-			for (int i = 0; i < numAttacks; i++) { animSet.AttackEntries.Add(SetAttackEntry.ReadEntry(reader)); }
+        if (!int.TryParse(reader.ReadLineSafe(), out int numAttacks))
+        {
+            return animSet;
+        }
 
-			if (!int.TryParse(reader.ReadLineSafe(), out numAnimationInfos)) return animSet;
-			for (int i = 0; i < numAnimationInfos; i++) { animSet.AnimInfos.Add(SetCachedAnimInfo.Read(reader)); }
+        for (int i = 0; i < numAttacks; i++) { animSet.AttackEntries.Add(SetAttackEntry.ReadEntry(reader)); }
 
-			animSet.SyncCounts();
+        if (!int.TryParse(reader.ReadLineSafe(), out int numAnimationInfos))
+        {
+            return animSet;
+        }
 
-			return animSet;
-		}
-		private void SyncCounts()
-		{
-			NumTriggers = Triggers.Count;
-			NumConditions = Conditions.Count;
-			NumAttackEntries = AttackEntries.Count;
-			NumAnimationInfos = AnimInfos.Count;
-		}
-		public override string ToString()
-		{
-			SyncCounts();
+        for (int i = 0; i < numAnimationInfos; i++) { animSet.AnimInfos.Add(SetCachedAnimInfo.Read(reader)); }
 
-			StringBuilder sb = new StringBuilder();
+        animSet.SyncCounts();
 
-			sb.AppendLine(VersionName);
+        return animSet;
+    }
+    private void SyncCounts()
+    {
+        this.NumTriggers = this.Triggers.Count;
+        this.NumConditions = this.Conditions.Count;
+        this.NumAttackEntries = this.AttackEntries.Count;
+        this.NumAnimationInfos = this.AnimInfos.Count;
+    }
+    public override string ToString()
+    {
+        this.SyncCounts();
 
-			sb.AppendLine(NumTriggers.ToString());
-			if (NumTriggers > 0) { sb.AppendJoin("\r\n", Triggers).AppendLine(); }
+        StringBuilder sb = new();
 
-			sb.AppendLine(NumConditions.ToString());
-			if (NumConditions > 0) { sb.AppendJoin("", Conditions);  }
+        _ = sb.AppendLine(this.VersionName);
 
-			sb.AppendLine(NumAttackEntries.ToString());
-			if (NumAttackEntries > 0) { sb.AppendJoin("\r\n", AttackEntries).AppendLine(); }
+        _ = sb.AppendLine(this.NumTriggers.ToString());
+        if (this.NumTriggers > 0) { _ = sb.AppendJoin("\r\n", this.Triggers).AppendLine(); }
 
-			
+        _ = sb.AppendLine(this.NumConditions.ToString());
+        if (this.NumConditions > 0) { _ = sb.AppendJoin("", this.Conditions); }
 
-			sb.AppendLine(NumAnimationInfos.ToString());
-			if (NumAnimationInfos > 0) { sb.AppendJoin("", AnimInfos); }
+        _ = sb.AppendLine(this.NumAttackEntries.ToString());
+        if (this.NumAttackEntries > 0) { _ = sb.AppendJoin("\r\n", this.AttackEntries).AppendLine(); }
 
-			return sb.ToString();
-		}
+        _ = sb.AppendLine(this.NumAnimationInfos.ToString());
+        if (this.NumAnimationInfos > 0) { _ = sb.AppendJoin("", this.AnimInfos); }
 
-	}
+        return sb.ToString();
+    }
+
 }
