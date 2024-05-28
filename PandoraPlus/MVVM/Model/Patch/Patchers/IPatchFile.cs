@@ -1,18 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.IO;
 
-namespace Pandora.Patch.Patchers
+namespace Pandora.Patch.Patchers;
+
+public interface IPatchFile
 {
-	public interface IPatchFile
-	{
-		public FileInfo InputHandle { get;  }
+    public FileInfo InputHandle { get; }
 
-		public FileInfo OutputHandle { get; }
+    public FileInfo OutputHandle { get; }
 
-		public bool Export();
-	}
+    public bool Export();
 }

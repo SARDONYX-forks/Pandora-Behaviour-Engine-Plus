@@ -1,43 +1,43 @@
 ﻿using System.IO;
 using System.Text;
 
-namespace Pandora.Patch.Patchers.Skyrim.AnimSetData
+namespace Pandora.Patch.Patchers.Skyrim.AnimSetData;
+
+public class SetCondition
 {
-    public class SetCondition
-	{
-		public string VariableName { get; private set; } = string.Empty;
+    public string VariableName { get; private set; } = string.Empty;
 
-		public int Value1 { get; private set; } = 0;
+    public int Value1 { get; private set; } = 0;
 
-		public int Value2 { get; private set; } = 0;
+    public int Value2 { get; private set; } = 0;
 
-		public static SetCondition ReadCondition(StreamReader reader)
-		{
-			var condition = new SetCondition();
+    public static SetCondition ReadCondition(StreamReader reader)
+    {
+        SetCondition condition = new()
+        {
+            VariableName = reader.ReadLineSafe()
+        };
 
-			condition.VariableName = reader.ReadLineSafe();
+        if (!int.TryParse(reader.ReadLineSafe(), out int value1) || !int.TryParse(reader.ReadLineSafe(), out int value2))
+        {
+            return condition;
+        }
 
-			int value1;
-			int value2;
+        condition.Value1 = value1;
+        condition.Value2 = value2;
 
-			if (!int.TryParse(reader.ReadLineSafe(), out value1) || !int.TryParse(reader.ReadLineSafe(), out value2)) return condition;
+        return condition;
+    }
 
-			condition.Value1 = value1;
-			condition.Value2 = value2;
+    public override string ToString()
+    {
+        StringBuilder sb = new();
 
-			return condition; 
-		}
+        _ = sb.AppendLine(this.VariableName);
+        _ = sb.AppendLine(this.Value1.ToString());
+        _ = sb.AppendLine(this.Value2.ToString());
 
-		public override string ToString()
-		{
-			StringBuilder sb = new StringBuilder();
+        return sb.ToString();
 
-			sb.AppendLine(VariableName);
-			sb.AppendLine(Value1.ToString());
-			sb.AppendLine(Value2.ToString());
-
-			return sb.ToString();
-
-		}
-	}
+    }
 }

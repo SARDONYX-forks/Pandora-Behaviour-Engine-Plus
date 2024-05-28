@@ -1,55 +1,50 @@
-﻿using Pandora.Core.Patchers.Skyrim;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Xml.Linq;
+using Pandora.Core.Patchers.Skyrim;
 
 namespace Pandora.Patch.Patchers.Skyrim.Hkx;
 public class PackFileCharacter : PackFile
 {
-	public PackFileCharacter(FileInfo file) : base(file) { LoadAnimationNames(); }
+    public PackFileCharacter(FileInfo file) : base(file) { this.LoadAnimationNames(); }
 
-	public PackFileCharacter(FileInfo file, Project project) : base(file, project) { LoadAnimationNames(); }
+    public PackFileCharacter(FileInfo file, Project project) : base(file, project) { this.LoadAnimationNames(); }
 
-	private XElement? animationNamesContainer;
+    private XElement? animationNamesContainer;
 
-	public uint InitialAnimationCount { get; private set; } = 0;
+    public uint InitialAnimationCount { get; private set; } = 0;
 
-	public string AnimationNamesPath { get; private set; }
+    public string AnimationNamesPath { get; private set; }
 
-	public string RigNamePath {  get; private set; }
+    public string RigNamePath { get; private set; }
 
-	public string BehaviorFilenamePath { get; private set; }
+    public string BehaviorFilenamePath { get; private set; }
 
-	[MemberNotNull(nameof(AnimationNamesPath), nameof(RigNamePath), nameof(BehaviorFilenamePath))]
-	private void LoadAnimationNames()
-	{
-		TryBuildClassLookup();
+    [MemberNotNull(nameof(AnimationNamesPath), nameof(RigNamePath), nameof(BehaviorFilenamePath))]
+    private void LoadAnimationNames()
+    {
+        this.TryBuildClassLookup();
 
-		XElement stringDataContainer = classLookup["hkbCharacterStringData"].First();
+        XElement stringDataContainer = this.classLookup["hkbCharacterStringData"].First();
 
-		string characterStringDataPath = Map.GenerateKey(stringDataContainer);
-		Activate();
-		MapNode(characterStringDataPath);
+        string characterStringDataPath = this.Map.GenerateKey(stringDataContainer);
+        this.Activate();
+        this.MapNode(characterStringDataPath);
 
-		AnimationNamesPath = $"{characterStringDataPath}/animationNames";
-		RigNamePath = $"{characterStringDataPath}/rigName";
-		BehaviorFilenamePath = $"{characterStringDataPath}/behaviorFilename";
+        this.AnimationNamesPath = $"{characterStringDataPath}/animationNames";
+        this.RigNamePath = $"{characterStringDataPath}/rigName";
+        this.BehaviorFilenamePath = $"{characterStringDataPath}/behaviorFilename";
 
-		animationNamesContainer = Map.Lookup(AnimationNamesPath);
+        this.animationNamesContainer = this.Map.Lookup(this.AnimationNamesPath);
 
-		var animationCountAttribute = animationNamesContainer.Attribute("numelements");
-		InitialAnimationCount = (animationCountAttribute != null) ? uint.Parse(animationCountAttribute.Value) : NewAnimationCount;
-	}
+        XAttribute? animationCountAttribute = this.animationNamesContainer.Attribute("numelements");
+        this.InitialAnimationCount = (animationCountAttribute != null) ? uint.Parse(animationCountAttribute.Value) : this.NewAnimationCount;
+    }
 
+    public List<XElement> AnimationNames => this.animationNamesContainer!.Elements().ToList();
 
-	public List<XElement> AnimationNames => animationNamesContainer!.Elements().ToList();
-
-	public uint NewAnimationCount => ((uint)AnimationNames.Count - InitialAnimationCount);
-
+    public uint NewAnimationCount => (uint)this.AnimationNames.Count - this.InitialAnimationCount;
 
 }

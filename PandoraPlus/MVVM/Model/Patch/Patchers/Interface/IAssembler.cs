@@ -1,34 +1,29 @@
-﻿using Pandora.Core;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using XmlCake.Linq;
-using XmlCake.Linq.Expressions;
+using Pandora.Core;
 
-namespace Pandora.Patch.Patchers
+namespace Pandora.Patch.Patchers;
+
+public interface IAssembler
 {
-	public interface IAssembler
-	{
-		public void LoadResources();
+    public void LoadResources();
 
-		public Task LoadResourcesAsync();
+    public Task LoadResourcesAsync();
 
-		public void AssemblePatch(IModInfo mod);
+    public void AssemblePatch(IModInfo mod);
 
-		public void GetPostMessages(StringBuilder builder);
+    public void GetPostMessages(StringBuilder builder);
 
-		public virtual async Task AssemblePatchAsync(IModInfo mod)
-		{
-			await Task.Run(() => AssemblePatch(mod));	
-		}
-		public bool ApplyPatches();
+    public virtual async Task AssemblePatchAsync(IModInfo mod)
+    {
+        await Task.Run(() => this.AssemblePatch(mod));
+    }
+    public bool ApplyPatches();
 
-		public Task<bool> ApplyPatchesAsync();
+    public Task<bool> ApplyPatchesAsync();
 
-		public List<(FileInfo inFile, FileInfo outFile)> GetExportFiles(); 
+    public List<(FileInfo inFile, FileInfo outFile)> GetExportFiles();
 
-	}
 }

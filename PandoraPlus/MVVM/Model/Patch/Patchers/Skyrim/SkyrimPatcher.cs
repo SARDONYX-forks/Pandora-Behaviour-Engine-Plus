@@ -1,158 +1,162 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using Pandora.Core;
 using Pandora.Core.Patchers;
-using Pandora.Core.Patchers.Skyrim;
-using Pandora.Patch.Patchers.Skyrim.AnimData;
-using XmlCake.Linq;
-using Pandora.Patch.Patchers.Skyrim.Nemesis;
-using System.Diagnostics.Eventing.Reader;
-using System.Security.AccessControl;
-using Pandora.Patch.Patchers.Skyrim.Pandora;
-using Pandora.Core.IOManagers;
-using Pandora.Patch.Patchers.Skyrim.Hkx;
 using Pandora.Patch.IOManagers;
 using Pandora.Patch.IOManagers.Skyrim;
+using Pandora.Patch.Patchers.Skyrim.Hkx;
+using Pandora.Patch.Patchers.Skyrim.Nemesis;
+using Pandora.Patch.Patchers.Skyrim.Pandora;
+using PatcherFlags = Pandora.Core.Patchers.IPatcher.PatcherFlags;
 
 namespace Pandora.Patch.Patchers.Skyrim;
-using PatcherFlags = IPatcher.PatcherFlags;
 public class SkyrimPatcher : IPatcher
 {
-	private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+    private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
 
-	private List<IModInfo> activeMods { get; set; } = new List<IModInfo>();
+    private List<IModInfo> activeMods { get; set; } = new List<IModInfo>();
 
-	public void SetTarget(List<IModInfo> mods) => activeMods = mods;
-	private Exporter<PackFile> exporter = new PackFileExporter();
+    public void SetTarget(List<IModInfo> mods)
+    {
+        this.activeMods = mods;
+    }
 
-	private NemesisAssembler nemesisAssembler { get; set; }
+    private readonly Exporter<PackFile> exporter = new PackFileExporter();
 
-	private PandoraAssembler pandoraAssembler { get; set; }
+    private NemesisAssembler nemesisAssembler { get; set; }
 
-	public IPatcher.PatcherFlags Flags { get; private set; } = IPatcher.PatcherFlags.None;
+    private PandoraAssembler pandoraAssembler { get; set; }
 
-	private static readonly Version currentVersion = new Version(1, 4, 2);
+    public PatcherFlags Flags { get; private set; } = PatcherFlags.None;
 
-	private static readonly string versionLabel = "alpha";
-	public string GetVersionString() => $"{currentVersion.ToString()}-{versionLabel}";
-	public Version GetVersion() => currentVersion;
+    private static readonly Version currentVersion = new(1, 4, 2);
 
-	public SkyrimPatcher()
-	{
-		nemesisAssembler = new NemesisAssembler();
-		pandoraAssembler = new PandoraAssembler(nemesisAssembler);
-	}
-	public SkyrimPatcher(Exporter<PackFile> manager)
-	{
-		exporter = manager;
-		nemesisAssembler = new NemesisAssembler(manager);
-		pandoraAssembler = new PandoraAssembler(nemesisAssembler);
-	}
-	public string GetPostRunMessages()
-	{
-		StringBuilder logBuilder;
-		logBuilder = new StringBuilder("Resources loaded successfully.\r\n\r\n");
+    private static readonly string versionLabel = "alpha";
+    public string GetVersionString()
+    {
+        return $"{currentVersion}-{versionLabel}";
+    }
 
-		for (int i = 0; i < activeMods.Count; i++)
-		{
-			IModInfo mod = activeMods[i];
-			string modLine = $"Pandora Mod {i + 1} : {mod.Name} - v.{mod.Version}";
-			logBuilder.AppendLine(modLine);
-			logger.Info(modLine);
-		}
+    public Version GetVersion()
+    {
+        return currentVersion;
+    }
 
-		nemesisAssembler.GetPostMessages(logBuilder);
+    public SkyrimPatcher()
+    {
+        this.nemesisAssembler = new NemesisAssembler();
+        this.pandoraAssembler = new PandoraAssembler(this.nemesisAssembler);
+    }
+    public SkyrimPatcher(Exporter<PackFile> manager)
+    {
+        this.exporter = manager;
+        this.nemesisAssembler = new NemesisAssembler(manager);
+        this.pandoraAssembler = new PandoraAssembler(this.nemesisAssembler);
+    }
+    public string GetPostRunMessages()
+    {
+        StringBuilder logBuilder;
+        logBuilder = new StringBuilder("Resources loaded successfully.\r\n\r\n");
 
+        for (int i = 0; i < this.activeMods.Count; i++)
+        {
+            IModInfo mod = this.activeMods[i];
+            string modLine = $"Pandora Mod {i + 1} : {mod.Name} - v.{mod.Version}";
+            _ = logBuilder.AppendLine(modLine);
+            logger.Info(modLine);
+        }
 
-		return logBuilder.ToString();
-	}
+        this.nemesisAssembler.GetPostMessages(logBuilder);
 
-	public string GetFailureMessages()
-	{
-		StringBuilder logBuilder;
-		logBuilder = new StringBuilder("CRITICAL FAILURE \r\n\r\n");
+        return logBuilder.ToString();
+    }
 
-		if (Flags.HasFlag(PatcherFlags.UpdateFailed)) { logBuilder.AppendLine("Engine had one or more errors while updating."); }
+    public string GetFailureMessages()
+    {
+        StringBuilder logBuilder;
+        logBuilder = new StringBuilder("CRITICAL FAILURE \r\n\r\n");
 
-		logBuilder.Append("If the cause is unknown: submit a report to the author of the engine and attach Engine.log");
+        if (this.Flags.HasFlag(PatcherFlags.UpdateFailed)) { _ = logBuilder.AppendLine("Engine had one or more errors while updating."); }
 
-		return logBuilder.ToString();
-	}
+        _ = logBuilder.Append("If the cause is unknown: submit a report to the author of the engine and attach Engine.log");
 
-	public void Run()
-	{
-		//assembler.ApplyPatches();
-	}
-	public async Task<bool> RunAsync()
-	{
-		return await nemesisAssembler.ApplyPatchesAsync();
-	}
+        return logBuilder.ToString();
+    }
 
-	public async Task<bool> UpdateAsync()
-	{
+    public void Run()
+    {
+        //assembler.ApplyPatches();
+    }
+    public async Task<bool> RunAsync()
+    {
+        return await this.nemesisAssembler.ApplyPatchesAsync();
+    }
 
-		logger.Info($"Skyrim Patcher {GetVersionString()}");
+    public async Task<bool> UpdateAsync()
+    {
 
-		//Parallel.ForEach(activeMods, mod => { assembler.AssemblePatch(mod); });
+        logger.Info($"Skyrim Patcher {this.GetVersionString()}");
 
-		try
-		{
-			Parallel.ForEach(activeMods, mod =>
-			{
-				switch (mod.Format)
-				{
-					case IModInfo.ModFormat.Nemesis:
-						nemesisAssembler.AssemblePatch(mod);
-						break;
-					case IModInfo.ModFormat.Pandora:
-						pandoraAssembler.AssemblePatch(mod);
-						break;
-					default:
-						break;
-				}
-			}
-			);
-		}
-		catch (Exception ex)
-		{
-			Flags |= PatcherFlags.UpdateFailed;
-			logger.Fatal($"Skyrim Patcher > Active Mods > Update > FAILED > {ex.ToString()}");
-		}
+        //Parallel.ForEach(activeMods, mod => { assembler.AssemblePatch(mod); });
 
-		//await assembler.LoadResourcesAsync();
+        try
+        {
+            _ = Parallel.ForEach(this.activeMods, mod =>
+            {
+                switch (mod.Format)
+                {
+                    case IModInfo.ModFormat.Nemesis:
+                        this.nemesisAssembler.AssemblePatch(mod);
+                        break;
+                    case IModInfo.ModFormat.Pandora:
+                        this.pandoraAssembler.AssemblePatch(mod);
+                        break;
+                    case IModInfo.ModFormat.FNIS:
+                        break;
+                    default:
+                        break;
+                }
+            }
+            );
+        }
+        catch (Exception ex)
+        {
+            this.Flags |= PatcherFlags.UpdateFailed;
+            logger.Fatal($"Skyrim Patcher > Active Mods > Update > FAILED > {ex}");
+        }
 
-		//List<Task> assembleTasks = new List<Task>();
-		//foreach (var mod in activeMods)
-		//{
-		//	assembleTasks.Add(Task.Run(() => { assembler.AssemblePatch(mod); }));
-		//}
-		//await Task.WhenAll(assembleTasks);
+        //await assembler.LoadResourcesAsync();
 
-		return !Flags.HasFlag(PatcherFlags.UpdateFailed);
-	}
+        //List<Task> assembleTasks = new List<Task>();
+        //foreach (var mod in activeMods)
+        //{
+        //	assembleTasks.Add(Task.Run(() => { assembler.AssemblePatch(mod); }));
+        //}
+        //await Task.WhenAll(assembleTasks);
 
-	public async Task WriteAsync()
-	{
+        return !this.Flags.HasFlag(PatcherFlags.UpdateFailed);
+    }
 
-	}
+    public static async Task WriteAsync()
+    {
 
-	public void Update()
-	{
+    }
 
-	}
+    public void Update()
+    {
 
-	public async Task PreloadAsync()
-	{
-		await nemesisAssembler.LoadResourcesAsync();
-	}
+    }
 
-	public void SetOutputPath(DirectoryInfo directoryInfo)
-	{
-		exporter.ExportDirectory = directoryInfo;
-	}
+    public async Task PreloadAsync()
+    {
+        await this.nemesisAssembler.LoadResourcesAsync();
+    }
+
+    public void SetOutputPath(DirectoryInfo directoryInfo)
+    {
+        this.exporter.ExportDirectory = directoryInfo;
+    }
 }

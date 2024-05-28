@@ -1,364 +1,353 @@
-﻿using Pandora.MVVM.Data;
-
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading.Tasks;
 using Pandora.Command;
 using Pandora.Core;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Threading.Tasks;
-using Pandora.MVVM.View.Controls;
-using System;
-using System.Text;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
-using System.Linq;
-using System.Threading.Channels;
-using System.Windows.Media.Animation;
-using System.IO;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Threading;
 using Pandora.Core.Engine.Configs;
-using System.Security.Policy;
+using Pandora.MVVM.Data;
 
+namespace Pandora.MVVM.ViewModel;
 
-namespace Pandora.MVVM.ViewModel
+public class EngineViewModel : INotifyPropertyChanged
 {
-    public class EngineViewModel : INotifyPropertyChanged
+    private readonly NemesisModInfoProvider nemesisModInfoProvider = new();
+    private readonly PandoraModInfoProvider pandoraModInfoProvider = new();
+
+    private string logText = "";
+    private readonly HashSet<string> startupArguments = new(StringComparer.OrdinalIgnoreCase);
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+
+    public bool? DialogResult { get; set; } = true;
+    private bool closeOnFinish = false;
+    private bool autoRun = false;
+    public BehaviourEngine Engine { get; private set; } = new BehaviourEngine();
+
+    public RelayCommand LaunchCommand { get; }
+    public RelayCommand SetEngineConfigCommand { get; }
+    public RelayCommand ExitCommand { get; }
+
+    public ObservableCollection<IModInfo> Mods { get; set; } = new ObservableCollection<IModInfo>();
+
+    public bool LaunchEnabled { get; set; } = true;
+
+    private bool engineRunning = false;
+
+    private readonly FileInfo activeModConfig;
+
+    private readonly Dictionary<string, IModInfo> modsByCode = new();
+
+    private bool modInfoCache = false;
+
+    private static readonly DirectoryInfo currentDirectory = new(Directory.GetCurrentDirectory());
+
+    private Task preloadTask;
+
+    private ObservableCollection<IEngineConfigurationViewModel> engineConfigs = new();
+    public ObservableCollection<IEngineConfigurationViewModel> EngineConfigurationViewModels
     {
-        private readonly NemesisModInfoProvider nemesisModInfoProvider = new NemesisModInfoProvider();
-        private readonly PandoraModInfoProvider pandoraModInfoProvider = new PandoraModInfoProvider();
-
-		private string logText = "";
-        private HashSet<string> startupArguments = new(StringComparer.OrdinalIgnoreCase);
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-		private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
-
-		public bool? DialogResult { get; set; } = true;
-        private bool closeOnFinish = false;
-        private bool autoRun = false; 
-        public BehaviourEngine Engine { get; private set; } = new BehaviourEngine();
-
-        public RelayCommand LaunchCommand { get; }
-        public RelayCommand SetEngineConfigCommand { get; }
-        public RelayCommand ExitCommand { get; }
-
-        public ObservableCollection<IModInfo> Mods { get; set; } = new ObservableCollection<IModInfo>();
-
-	
-		public bool LaunchEnabled { get; set; } = true;
-
-
-
-        private bool engineRunning = false;
-
-        private FileInfo activeModConfig; 
-
-        private Dictionary<string, IModInfo> modsByCode = new Dictionary<string, IModInfo>();
-
-        private bool modInfoCache = false;
-
-        private static DirectoryInfo currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
-
-        private Task preloadTask;
-
-        private ObservableCollection<IEngineConfigurationViewModel> engineConfigs = new ObservableCollection<IEngineConfigurationViewModel>();
-		public ObservableCollection<IEngineConfigurationViewModel> EngineConfigurationViewModels 
-        { get => engineConfigs; 
-            set 
-            { 
-                engineConfigs = value; 
-                RaisePropertyChanged(nameof(EngineConfigurationViewModels));
-            } 
+        get => this.engineConfigs;
+        set
+        {
+            this.engineConfigs = value;
+            this.RaisePropertyChanged(nameof(this.EngineConfigurationViewModels));
         }
+    }
 
+    public string LogText
+    {
+        get => this.logText;
+        set
+        {
+            this.logText = value;
+            this.RaisePropertyChanged(nameof(this.LogText));
+        }
+    }
+    private void RaisePropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+    public EngineViewModel()
+    {
+        this.startupArguments = Environment.GetCommandLineArgs().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        this.LaunchCommand = new RelayCommand(this.LaunchEngine, this.CanLaunchEngine);
+        this.ExitCommand = new RelayCommand(Exit);
+        this.SetEngineConfigCommand = new RelayCommand(this.SetEngineConfiguration, this.CanLaunchEngine);
+        this.activeModConfig = new FileInfo($"{currentDirectory}\\Pandora_Engine\\ActiveMods.txt");
+        CultureInfo culture;
 
-		public string LogText { 
-            get => logText;
-            set
+        culture = CultureInfo.CreateSpecificCulture("en-US");
+
+        CultureInfo.DefaultThreadCurrentCulture = culture;
+        CultureInfo.DefaultThreadCurrentUICulture = culture;
+        CultureInfo.CurrentCulture = culture;
+        this.ReadStartupArguments();
+        this.SetupConfigurationOptions();
+        this.preloadTask = Task.Run(this.Engine.PreloadAsync);
+
+        if (this.autoRun) { this.LaunchCommand.Execute(null); }
+
+    }
+    private void SetupConfigurationOptions()
+    {
+        this.EngineConfigurationViewModels.Add(
+            new EngineConfigurationViewModelContainer("Skyrim SE/AE",
+                new EngineConfigurationViewModelContainer("Behavior",
+
+                    new EngineConfigurationViewModelContainer("Patch",
+                        new EngineConfigurationViewModel<SkyrimConfiguration>("Normal", this.SetEngineConfigCommand),
+                        new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Debug", this.SetEngineConfigCommand)
+                    )
+                    //,
+                    //new EngineConfigurationViewModelContainer("Convert"
+
+                    //),
+                    //new EngineConfigurationViewModelContainer("Validate"
+                    //)
+                    )
+                )
+            );
+        //EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimConfiguration>("Skyrim SE/AE", SetEngineConfigCommand));
+        //EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Skyrim SE/AE Debug", SetEngineConfigCommand));
+    }
+    public async Task LoadAsync()
+    {
+
+        List<IModInfo> modInfos = new();
+
+        modInfos.AddRange(await this.nemesisModInfoProvider?.GetInstalledMods(currentDirectory + "\\Nemesis_Engine\\mod")!);
+        modInfos.AddRange(await this.pandoraModInfoProvider?.GetInstalledMods(currentDirectory + "\\Pandora_Engine\\mod")!);
+
+        for (int i = 0; i < modInfos.Count; i++)
+        {
+            IModInfo? modInfo = modInfos[i];
+            //Mods.Add(modInfo);
+            if (this.modsByCode.TryGetValue(modInfo.Code, out IModInfo? existingModInfo))
             {
-                logText = value;
-                RaisePropertyChanged(nameof(LogText));
+                logger.Warn($"Engine > Folder {modInfo.Folder.Parent?.Name} > Parse Info > {modInfo.Code} Already Exists > SKIPPED");
+                modInfos.RemoveAt(i);
+                continue;
             }
+            this.modsByCode.Add(modInfo.Code, modInfo);
         }
-        private void RaisePropertyChanged([CallerMemberName] string? propertyName=null)
+
+        this.modInfoCache = this.LoadActiveMods(modInfos);
+
+        modInfos = modInfos.OrderBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList();
+
+        foreach (IModInfo modInfo in modInfos) { this.Mods.Add(modInfo); }
+        await this.WriteLogBoxLine("Mods loaded.");
+    }
+
+    public static void Exit(object? p)
+    {
+        System.Windows.Application.Current.MainWindow.Close();
+    }
+    internal async Task ClearLogBox()
+    {
+        this.LogText = "";
+    }
+
+    internal async Task WriteLogBoxLine(string text)
+    {
+        StringBuilder sb = new(this.LogText);
+        if (this.LogText.Length > 0)
         {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            _ = sb.Append(Environment.NewLine);
         }
-        public EngineViewModel()
+
+        _ = sb.Append(text);
+        this.LogText = sb.ToString();
+    }
+    internal async Task WriteLogBox(string text)
+    {
+        StringBuilder sb = new(this.LogText);
+        _ = sb.Append(text);
+        this.LogText = sb.ToString();
+    }
+    private void ReadStartupArguments()
+    {
+        if (this.startupArguments.Remove("-skyrimDebug64"))
         {
-            startupArguments = Environment.GetCommandLineArgs().ToHashSet(StringComparer.OrdinalIgnoreCase);
-            LaunchCommand = new RelayCommand(LaunchEngine, CanLaunchEngine);
-            ExitCommand = new RelayCommand(Exit);
-            SetEngineConfigCommand = new RelayCommand(SetEngineConfiguration, CanLaunchEngine);
-			activeModConfig = new FileInfo($"{currentDirectory}\\Pandora_Engine\\ActiveMods.txt");
-			CultureInfo culture;
-
-			culture = CultureInfo.CreateSpecificCulture("en-US");
-
-			CultureInfo.DefaultThreadCurrentCulture = culture;
-			CultureInfo.DefaultThreadCurrentUICulture = culture;
-			CultureInfo.CurrentCulture = culture;
-			ReadStartupArguments();
-            SetupConfigurationOptions();
-			preloadTask = Task.Run(Engine.PreloadAsync);
-
-			if (autoRun) { LaunchCommand.Execute(null); }
-
-
-		}
-        private void SetupConfigurationOptions()
-        {
-            EngineConfigurationViewModels.Add(
-                new EngineConfigurationViewModelContainer("Skyrim SE/AE",
-                    new EngineConfigurationViewModelContainer("Behavior", 
-
-                        new EngineConfigurationViewModelContainer("Patch",
-                            new EngineConfigurationViewModel<SkyrimConfiguration>("Normal", SetEngineConfigCommand),
-                            new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Debug", SetEngineConfigCommand)
-                        )
-                        //,
-                        //new EngineConfigurationViewModelContainer("Convert"
-                            
-                        //),
-                        //new EngineConfigurationViewModelContainer("Validate"
-                        //)
-					    )
-				    )
-                );
-            //EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimConfiguration>("Skyrim SE/AE", SetEngineConfigCommand));
-            //EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Skyrim SE/AE Debug", SetEngineConfigCommand));
+            this.Engine = new BehaviourEngine(new SkyrimDebugConfiguration());
         }
-        public async Task LoadAsync()
+        if (this.startupArguments.Remove("-autoClose"))
         {
-			
-
-			List<IModInfo> modInfos = new List<IModInfo>();
-
-			modInfos.AddRange(await nemesisModInfoProvider?.GetInstalledMods(currentDirectory + "\\Nemesis_Engine\\mod")!);
-			modInfos.AddRange(await pandoraModInfoProvider?.GetInstalledMods(currentDirectory + "\\Pandora_Engine\\mod")!);
-
-
-			for (int i = 0; i < modInfos.Count; i++)
+            this.closeOnFinish = true;
+        }
+        foreach (string arg in this.startupArguments)
+        {
+            if (arg.StartsWith("-o:", StringComparison.OrdinalIgnoreCase))
             {
-				IModInfo? modInfo = modInfos[i];
-				//Mods.Add(modInfo);
-				IModInfo? existingModInfo;
-                if (modsByCode.TryGetValue(modInfo.Code, out existingModInfo))
-                {
-                    logger.Warn($"Engine > Folder {modInfo.Folder.Parent?.Name} > Parse Info > {modInfo.Code} Already Exists > SKIPPED");
-                    modInfos.RemoveAt(i);
-                    continue;
-                }
-                modsByCode.Add(modInfo.Code, modInfo);
+                ReadOnlySpan<char> argArr = arg.AsSpan();
+                ReadOnlySpan<char> pathArr = argArr[3..];
+                this.Engine.Configuration.Patcher.SetOutputPath(pathArr.Trim().ToString());
+                continue;
             }
-
-            modInfoCache = LoadActiveMods(modInfos);
-
-            modInfos = modInfos.OrderBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList();
-
-            foreach(var modInfo in modInfos) { Mods.Add(modInfo);  }
-            await WriteLogBoxLine("Mods loaded.");
-		}
-
-        public void Exit(object? p)
-        {
-            App.Current.MainWindow.Close();
+            //            if (arg.Equals("-sseDebug", StringComparison.OrdinalIgnoreCase))
+            //            {
+            //                Engine = new BehaviourEngine(new SkyrimDebugConfiguration());
+            //                continue;
+            //            }
+            //            if (arg.Equals("-autorun", StringComparison.OrdinalIgnoreCase))
+            //            {
+            //	closeOnFinish = true;
+            //	launchImmediate = true;
+            //                continue;
+            //}
         }
-        internal async Task ClearLogBox() => LogText = "";
-        internal async Task WriteLogBoxLine(string text)
+        if (this.startupArguments.Remove("-autorun"))
         {
-            StringBuilder sb = new StringBuilder(LogText);
-            if (LogText.Length > 0) sb.Append(Environment.NewLine);
-            sb.Append(text);
-            LogText = sb.ToString();
+            this.closeOnFinish = true;
+            this.autoRun = true;
         }
-        internal async Task WriteLogBox(string text)
+
+    }
+    private bool LoadActiveMods(List<IModInfo> loadedMods)
+    {
+        if (!this.activeModConfig.Exists)
         {
-            StringBuilder sb = new StringBuilder(LogText);
-            sb.Append(text);
-            LogText = sb.ToString();
+            return false;
         }
-        private void ReadStartupArguments()
-        {
-            if (startupArguments.Remove("-skyrimDebug64"))
-            {
-				Engine = new BehaviourEngine(new SkyrimDebugConfiguration());
-			}
-            if (startupArguments.Remove("-autoClose"))
-            {
-				closeOnFinish = true;
-			}
-            foreach(var arg in startupArguments)
-            {
-                if (arg.StartsWith("-o:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var argArr = arg.AsSpan();
-                    var pathArr = argArr.Slice(3);
-                    Engine.Configuration.Patcher.SetOutputPath(pathArr.Trim().ToString());
-                    continue;
-                }
-    //            if (arg.Equals("-sseDebug", StringComparison.OrdinalIgnoreCase))
-    //            {
-    //                Engine = new BehaviourEngine(new SkyrimDebugConfiguration());
-    //                continue;
-    //            }
-    //            if (arg.Equals("-autorun", StringComparison.OrdinalIgnoreCase))
-    //            {
-				//	closeOnFinish = true;
-				//	launchImmediate = true;
-    //                continue;
-				//}
-            }
-			if (startupArguments.Remove("-autorun"))
-			{
-				closeOnFinish = true;
-				autoRun = true;
-			}
 
-        }
-        private bool LoadActiveMods(List<IModInfo> loadedMods)
+        foreach (IModInfo mod in loadedMods)
         {
-            if (!activeModConfig.Exists) return false;
-            foreach(var mod in loadedMods) 
-            { 
-                if (mod == null) continue;
-                mod.Active = false;  
-            }
-            using (var readStream = activeModConfig.OpenRead())
+            if (mod == null)
             {
-                using (var streamReader  = new StreamReader(readStream))
-                {
-					string? expectedLine;
-                    uint priority = 0; 
-                    while ((expectedLine = streamReader.ReadLine()) != null)
-                    {
-                        IModInfo? modInfo;
-                        if (!modsByCode.TryGetValue(expectedLine, out modInfo)) continue;
-                        priority++;
-                        modInfo.Priority = priority;
-                        modInfo.Active = true;
-                    }
-				}
-                
-                
-            }
-            return true;
-		}
-        private void SaveActiveMods(List<IModInfo> activeMods)
-        {
-
-
-            if (activeModConfig.Exists) { activeModConfig.Delete(); }
-			
-            
-            using (var writeStream = activeModConfig.OpenWrite())
-            {
-                using (StreamWriter streamWriter = new StreamWriter(writeStream)) 
-                { 
-                    foreach(var modInfo in activeMods)
-                    {
-                        streamWriter.WriteLine(modInfo.Code);
-                    }
-                }
+                continue;
             }
 
-
-		}
-        private List<IModInfo> AssignModPriorities(List<IModInfo> mods)
+            mod.Active = false;
+        }
+        using FileStream readStream = this.activeModConfig.OpenRead();
+        using StreamReader streamReader = new(readStream);
+        string? expectedLine;
+        uint priority = 0;
+        while ((expectedLine = streamReader.ReadLine()) != null)
         {
-            uint priority = 0;
-			foreach(var mod in mods)
+            if (!this.modsByCode.TryGetValue(expectedLine, out IModInfo? modInfo))
             {
-                priority++;
-                mod.Priority = priority; 
+                continue;
             }
 
-            return mods; 
+            priority++;
+            modInfo.Priority = priority;
+            modInfo.Active = true;
+        }
+        return true;
+    }
+    private void SaveActiveMods(List<IModInfo> activeMods)
+    {
+
+        if (this.activeModConfig.Exists) { this.activeModConfig.Delete(); }
+
+        using FileStream writeStream = this.activeModConfig.OpenWrite();
+        using StreamWriter streamWriter = new(writeStream);
+        foreach (IModInfo modInfo in activeMods)
+        {
+            streamWriter.WriteLine(modInfo.Code);
         }
 
-        private List<IModInfo> GetActiveModsByPriority() => AssignModPriorities(Mods.Where(m => m.Active).ToList());
-		private async void SetEngineConfiguration(object? config)
-		{
-			if (config == null) { return; }
-			IEngineConfigurationFactory engineConfiguration = (IEngineConfigurationFactory)config;
-            await preloadTask;
-            var newConfig = engineConfiguration.Config;
-			Engine = newConfig != null ? new BehaviourEngine(newConfig) : Engine;
-		}
-		private async void LaunchEngine(object? parameter)
+    }
+    private static List<IModInfo> AssignModPriorities(List<IModInfo> mods)
+    {
+        uint priority = 0;
+        foreach (IModInfo mod in mods)
         {
-			lock (LaunchCommand)
-			{
-				engineRunning = true;
-				LaunchEnabled = !engineRunning;
-			}
-			
-            logText= string.Empty;
+            priority++;
+            mod.Priority = priority;
+        }
 
-            await WriteLogBoxLine("Engine launched.");
-            await preloadTask;
-            List<IModInfo> activeMods = GetActiveModsByPriority();
+        return mods;
+    }
 
-            IModInfo? baseModInfo = Mods.Where(m => m.Code == "pandora").FirstOrDefault();
+    private List<IModInfo> GetActiveModsByPriority()
+    {
+        return AssignModPriorities(this.Mods.Where(m => m.Active).ToList());
+    }
 
-            if (baseModInfo == null) { await WriteLogBoxLine("FATAL ERROR: Pandora Base does not exist. Ensure the engine was installed properly and data is not corrupted."); return; }
-			if (!baseModInfo.Active)
-			{
-				baseModInfo.Active = true;
-				activeMods.Add(baseModInfo);
-			}
-			baseModInfo.Priority = uint.MaxValue;
+    private async void SetEngineConfiguration(object? config)
+    {
+        if (config == null) { return; }
+        IEngineConfigurationFactory engineConfiguration = (IEngineConfigurationFactory)config;
+        await this.preloadTask;
+        IEngineConfiguration? newConfig = engineConfiguration.Config;
+        this.Engine = newConfig != null ? new BehaviourEngine(newConfig) : this.Engine;
+    }
+    private async void LaunchEngine(object? parameter)
+    {
+        lock (this.LaunchCommand)
+        {
+            this.engineRunning = true;
+            this.LaunchEnabled = !this.engineRunning;
+        }
 
+        this.logText = string.Empty;
 
+        await this.WriteLogBoxLine("Engine launched.");
+        await this.preloadTask;
+        List<IModInfo> activeMods = this.GetActiveModsByPriority();
 
-			Stopwatch timer = Stopwatch.StartNew();
-            bool success = false;
-			await Task.Run(async() => { success = await Engine.LaunchAsync(activeMods); }); 
-            
-            
-            timer.Stop();
+        IModInfo? baseModInfo = this.Mods.FirstOrDefault(m => m.Code == "pandora");
 
-            await ClearLogBox();
-           
+        if (baseModInfo == null) { await this.WriteLogBoxLine("FATAL ERROR: Pandora Base does not exist. Ensure the engine was installed properly and data is not corrupted."); return; }
+        if (!baseModInfo.Active)
+        {
+            baseModInfo.Active = true;
+            activeMods.Add(baseModInfo);
+        }
+        baseModInfo.Priority = uint.MaxValue;
 
-            await WriteLogBoxLine(Engine.GetMessages(success));
+        Stopwatch timer = Stopwatch.StartNew();
+        bool success = false;
+        await Task.Run(async () => { success = await this.Engine.LaunchAsync(activeMods); });
 
-            if (!success)
+        timer.Stop();
+
+        await this.ClearLogBox();
+
+        await this.WriteLogBoxLine(this.Engine.GetMessages(success));
+
+        if (!success)
+        {
+            await this.WriteLogBoxLine($"Launch aborted. Existing output was not cleared, and current patch list will not be saved.");
+        }
+        else
+        {
+            await this.WriteLogBoxLine($"Launch finished in {Math.Round(timer.ElapsedMilliseconds / 1000.0, 2)} seconds");
+            await Task.Run(() => { this.SaveActiveMods(activeMods); });
+
+            if (this.closeOnFinish)
             {
-                await WriteLogBoxLine($"Launch aborted. Existing output was not cleared, and current patch list will not be saved.");
+                System.Windows.Application.Current.Shutdown();
             }
-            else
-            {
-				await WriteLogBoxLine($"Launch finished in {Math.Round(timer.ElapsedMilliseconds / 1000.0, 2)} seconds");
-				await Task.Run(() => { SaveActiveMods(activeMods); });
-
-                if (closeOnFinish) 
-                { 
-                    System.Windows.Application.Current.Shutdown(); 
-                }
-			}
-
-            
-			
-
-			Engine = new BehaviourEngine();
-            preloadTask = Task.Run(Engine.PreloadAsync);
-
-			lock (LaunchCommand)
-            {
-				engineRunning = false;
-				LaunchEnabled = !engineRunning;
-			}
-
         }
 
-        private bool CanLaunchEngine(object? parameter)
+        this.Engine = new BehaviourEngine();
+        this.preloadTask = Task.Run(this.Engine.PreloadAsync);
+
+        lock (this.LaunchCommand)
         {
-
-            return !engineRunning;
-            
+            this.engineRunning = false;
+            this.LaunchEnabled = !this.engineRunning;
         }
+
+    }
+
+    private bool CanLaunchEngine(object? parameter)
+    {
+
+        return !this.engineRunning;
+
     }
 }

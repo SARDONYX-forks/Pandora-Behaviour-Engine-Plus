@@ -1,130 +1,131 @@
-﻿using Pandora.Core.Patchers.Skyrim;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Xml.Linq;
+using Pandora.Core.Patchers.Skyrim;
 
 namespace Pandora.Patch.Patchers.Skyrim.Hkx;
 public class PackFileGraph : PackFile
 {
 
-	private XElement? eventNameContainer;
+    private XElement? eventNameContainer;
 
-	private XElement? eventFlagContainer;
+    private XElement? eventFlagContainer;
 
-	private XElement? variableNameContainer; 
+    private XElement? variableNameContainer;
 
-	private XElement? variableValueContainer;
+    private XElement? variableValueContainer;
 
-	private XElement? variableTypeContainer;
+    private XElement? variableTypeContainer;
 
-	public uint InitialEventCount { get; private set; } = 0;
-	public uint InitialVariableCount {  get; private set; } = 0;
+    public uint InitialEventCount { get; private set; } = 0;
+    public uint InitialVariableCount { get; private set; } = 0;
 
+    public string EventNamesPath { get; private set; }
 
-	public string EventNamesPath { get; private set; }
+    public string EventFlagsPath { get; private set; }
 
-	public string EventFlagsPath {  get; private set; }
+    public string VariableNamesPath { get; private set; }
 
-	public string VariableNamesPath { get; private set; }
+    public string VariableValuesPath { get; private set; }
 
-	public string VariableValuesPath {  get; private set; }
+    public string VariableTypesPath { get; private set; }
 
-	public string VariableTypesPath {  get; private set; }
+    [MemberNotNull(nameof(EventNamesPath), nameof(EventFlagsPath), nameof(VariableNamesPath), nameof(VariableValuesPath), nameof(VariableTypesPath))]
+    private void LoadEventsAndVariables()
+    {
+        this.TryBuildClassLookup();
+        XElement stringDataContainer = this.classLookup["hkbBehaviorGraphStringData"].First();
 
-	[MemberNotNull(nameof(EventNamesPath), nameof(EventFlagsPath), nameof(VariableNamesPath), nameof(VariableValuesPath), nameof(VariableTypesPath))]
-	private void LoadEventsAndVariables()
-	{
-		TryBuildClassLookup();
-		XElement stringDataContainer = classLookup["hkbBehaviorGraphStringData"].First();
+        XElement variableValueSetContainer = this.classLookup["hkbVariableValueSet"].First();
 
-		XElement variableValueSetContainer = classLookup["hkbVariableValueSet"].First();
+        XElement graphDataContainer = this.classLookup["hkbBehaviorGraphData"].First();
 
-		XElement graphDataContainer = classLookup["hkbBehaviorGraphData"].First();
+        string stringDataPath = this.Map.GenerateKey(stringDataContainer);
 
-		
+        string variableValueSetPath = this.Map.GenerateKey(variableValueSetContainer);
 
-		string stringDataPath = Map.GenerateKey(stringDataContainer);
+        string graphDataPath = this.Map.GenerateKey(graphDataContainer);
 
-		string variableValueSetPath = Map.GenerateKey(variableValueSetContainer);
+        this.MapNode(stringDataPath);
+        this.MapNode(variableValueSetPath);
+        this.MapNode(graphDataPath);
 
-		string graphDataPath = Map.GenerateKey(graphDataContainer);
+        this.EventNamesPath = $"{stringDataPath}/eventNames";
+        this.EventFlagsPath = $"{graphDataPath}/eventInfos";
 
-		MapNode(stringDataPath);
-		MapNode(variableValueSetPath);
-		MapNode(graphDataPath);
+        this.VariableNamesPath = $"{stringDataPath}/variableNames";
+        this.VariableValuesPath = $"{variableValueSetPath}/wordVariableValues";
+        this.VariableTypesPath = $"{graphDataPath}/variableInfos";
 
-		EventNamesPath = $"{stringDataPath}/eventNames";
-		EventFlagsPath = $"{graphDataPath}/eventInfos";
+        this.eventNameContainer = this.Map.Lookup(this.EventNamesPath);
 
-		VariableNamesPath = $"{stringDataPath}/variableNames";
-		VariableValuesPath = $"{variableValueSetPath}/wordVariableValues";
-		VariableTypesPath = $"{graphDataPath}/variableInfos";
+        this.eventFlagContainer = this.Map.Lookup(this.EventFlagsPath);
 
-		eventNameContainer = Map.Lookup(EventNamesPath);
+        this.variableNameContainer = this.Map.Lookup(this.VariableNamesPath);
 
-		eventFlagContainer = Map.Lookup(EventFlagsPath);
+        this.variableValueContainer = this.Map.Lookup(this.VariableValuesPath);
 
-		variableNameContainer = Map.Lookup(VariableNamesPath);
+        this.variableTypeContainer = this.Map.Lookup(this.VariableTypesPath);
 
-		variableValueContainer = Map.Lookup(VariableValuesPath);
+        XAttribute? eventCountAttribute = this.eventNameContainer.Attribute("numelements");
+        XAttribute? variableCountAttribute = this.variableNameContainer.Attribute("numelements");
+        this.InitialEventCount = eventCountAttribute != null ? uint.Parse(eventCountAttribute.Value) : (uint)this.eventNameContainer.Elements().Count();
+        this.InitialVariableCount = variableCountAttribute != null ? uint.Parse(variableCountAttribute.Value) : (uint)this.variableNameContainer.Elements().Count();
+    }
 
-		variableTypeContainer = Map.Lookup(VariableTypesPath);
+    public List<string> GetAnimationFilePaths()
+    {
+        this.TryBuildClassLookup();
 
-		var eventCountAttribute = eventNameContainer.Attribute("numelements");
-		var variableCountAttribute = variableNameContainer.Attribute("numelements");
-		InitialEventCount = eventCountAttribute != null ? uint.Parse(eventCountAttribute.Value) : (uint)eventNameContainer.Elements().Count();
-		InitialVariableCount = variableCountAttribute != null ? uint.Parse(variableCountAttribute.Value) : (uint)variableNameContainer.Elements().Count();	
-	}
+        const string clipGeneratorName = "hkbClipGenerator";
+        if (this.classLookup == null || !this.classLookup.Contains(clipGeneratorName)) { return new List<string>(); }
 
-	public List<string> GetAnimationFilePaths()
-	{
-		TryBuildClassLookup();
+        List<string> animationFilePaths = new();
 
-		const string clipGeneratorName = "hkbClipGenerator";
-		if (classLookup == null || !classLookup.Contains(clipGeneratorName)) { return new List<string>();  }
+        IEnumerable<XElement> clipGenerators = this.classLookup[clipGeneratorName];
 
-		List<string> animationFilePaths = new();
+        foreach (XElement clipGenerator in clipGenerators)
+        {
+            XElement? animationParam = clipGenerator.Elements().FirstOrDefault(e => e.Attribute("name")?.Value == "animationName");
+            if (animationParam == null || animationParam.Value.Length == 0)
+            {
+                continue;
+            }
 
-		var clipGenerators = classLookup[clipGeneratorName]; 
+            animationFilePaths.Add(animationParam.Value);
+        }
+        return animationFilePaths;
+    }
 
-		foreach(var clipGenerator in clipGenerators)
-		{
-			var animationParam = clipGenerator.Elements().Where(e => e.Attribute("name")?.Value == "animationName").FirstOrDefault();
-			if (animationParam == null || animationParam.Value.Length == 0) continue;
-			
-			animationFilePaths.Add(animationParam.Value);
-		}
-		return animationFilePaths;	
-	}
-
-	public PackFileGraph(FileInfo file, Project project) : base(file, project) 
+    public PackFileGraph(FileInfo file, Project project) : base(file, project)
     {
 
-	}
+    }
 
-	public PackFileGraph(FileInfo file) : base(file)
-	{
+    public PackFileGraph(FileInfo file) : base(file)
+    {
 
-	}
+    }
 
-	public override void Activate()
-	{
-		if (!CanActivate()) return;
-		base.Activate();
-		LoadEventsAndVariables();
-	}
-	public List<XElement> EventNames => eventNameContainer!.Elements().ToList();
+    public override void Activate()
+    {
+        if (!this.CanActivate())
+        {
+            return;
+        }
 
-	public List<XElement> EventFlags => eventFlagContainer!.Elements().ToList();
+        base.Activate();
+        this.LoadEventsAndVariables();
+    }
+    public List<XElement> EventNames => this.eventNameContainer!.Elements().ToList();
 
-	public List<XElement> VariableNames => variableNameContainer!.Elements().ToList();	
+    public List<XElement> EventFlags => this.eventFlagContainer!.Elements().ToList();
 
-	public List<XElement> VariableValues => variableValueContainer!.Elements().ToList();
+    public List<XElement> VariableNames => this.variableNameContainer!.Elements().ToList();
 
-	public List<XElement> VariableTypes => variableTypeContainer!.Elements().ToList();
+    public List<XElement> VariableValues => this.variableValueContainer!.Elements().ToList();
+
+    public List<XElement> VariableTypes => this.variableTypeContainer!.Elements().ToList();
 }

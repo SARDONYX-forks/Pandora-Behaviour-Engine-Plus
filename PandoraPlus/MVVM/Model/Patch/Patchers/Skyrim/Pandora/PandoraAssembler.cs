@@ -1,271 +1,262 @@
-﻿using HKX2;
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Xml.Linq;
 using Pandora.Core;
 using Pandora.Core.Patchers.Skyrim;
 using Pandora.Patch.Patchers.Skyrim.AnimData;
 using Pandora.Patch.Patchers.Skyrim.AnimSetData;
 using Pandora.Patch.Patchers.Skyrim.Hkx;
 using Pandora.Patch.Patchers.Skyrim.Nemesis;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection.Metadata.Ecma335;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml;
-using System.Xml.Linq;
+using ChangeType = Pandora.Patch.Patchers.Skyrim.Hkx.IPackFileChange.ChangeType;
 
-namespace Pandora.Patch.Patchers.Skyrim.Pandora
+namespace Pandora.Patch.Patchers.Skyrim.Pandora;
+
+public class PandoraAssembler
 {
-	using ChangeType = IPackFileChange.ChangeType;
-	public class PandoraAssembler
-	{
-		private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
-		public ProjectManager ProjectManager { get; private set; }	
-		public AnimDataManager AnimDataManager { get; private set; }	
-		public AnimSetDataManager AnimSetDataManager { get; private set; }
+    private static readonly NLog.Logger Logger = NLog.LogManager.GetCurrentClassLogger();
+    public ProjectManager ProjectManager { get; private set; }
+    public AnimDataManager AnimDataManager { get; private set; }
+    public AnimSetDataManager AnimSetDataManager { get; private set; }
 
-		private DirectoryInfo engineFolder = new DirectoryInfo(Directory.GetCurrentDirectory() + "\\Pandora_Engine");
+    private readonly DirectoryInfo engineFolder = new(Directory.GetCurrentDirectory() + "\\Pandora_Engine");
 
-		private DirectoryInfo templateFolder = new DirectoryInfo(Directory.GetCurrentDirectory() + "\\Pandora_Engine\\Skyrim\\Template");
+    private readonly DirectoryInfo templateFolder = new(Directory.GetCurrentDirectory() + "\\Pandora_Engine\\Skyrim\\Template");
 
-		private DirectoryInfo outputFolder = new DirectoryInfo($"{Directory.GetCurrentDirectory()}\\meshes");
+    private readonly DirectoryInfo outputFolder = new($"{Directory.GetCurrentDirectory()}\\meshes");
 
-		private Dictionary<string, FileInfo> cachedFiles = new Dictionary<string, FileInfo>();
+    private readonly Dictionary<string, FileInfo> cachedFiles = new();
+    private static readonly Dictionary<string, ChangeType> changeTypeNameMap = Enum.GetValues(typeof(ChangeType)).Cast<ChangeType>().ToDictionary(c => c.ToString(), v => v, StringComparer.OrdinalIgnoreCase);
 
-		private static readonly string stateMachineChildrenFormatPath = "{0}/states";
+    public PandoraAssembler()
+    {
+        this.ProjectManager = new ProjectManager(this.templateFolder, this.outputFolder);
+        this.AnimSetDataManager = new AnimSetDataManager(this.templateFolder, this.outputFolder);
+        this.AnimDataManager = new AnimDataManager(this.templateFolder, this.outputFolder);
+    }
+    public PandoraAssembler(NemesisAssembler nemesisAssembler)
+    {
+        this.ProjectManager = nemesisAssembler.ProjectManager;
+        this.AnimSetDataManager = nemesisAssembler.AnimSetDataManager;
+        this.AnimDataManager = nemesisAssembler.AnimDataManager;
+    }
+    public PandoraAssembler(ProjectManager projManager, AnimSetDataManager animSDManager, AnimDataManager animDManager)
+    {
+        this.ProjectManager = projManager;
+        this.AnimSetDataManager = animSDManager;
+        this.AnimDataManager = animDManager;
+    }
+    public void AssembleEdit(ChangeType changeType, XElement element, PackFileChangeSet changeSet)
+    {
+        XAttribute? pathAttribute = element.Attribute("path");
+        if (pathAttribute == null) { return; }
 
-		private static readonly Dictionary<string, ChangeType> changeTypeNameMap =  Enum.GetValues(typeof(ChangeType)).Cast<ChangeType>().ToDictionary(c => c.ToString(), v => v, StringComparer.OrdinalIgnoreCase);
+        bool isPathEmpty = string.IsNullOrWhiteSpace(pathAttribute.Value);
 
-		public PandoraAssembler()
-		{
-			ProjectManager = new ProjectManager(templateFolder, outputFolder);
-			AnimSetDataManager = new AnimSetDataManager(templateFolder, outputFolder);
-			AnimDataManager = new AnimDataManager(templateFolder, outputFolder);
-		}
-		public PandoraAssembler(NemesisAssembler nemesisAssembler)
-		{
-			ProjectManager = nemesisAssembler.ProjectManager;
-			AnimSetDataManager = nemesisAssembler.AnimSetDataManager;
-			AnimDataManager = nemesisAssembler.AnimDataManager;
-		}
-		public PandoraAssembler(ProjectManager projManager, AnimSetDataManager animSDManager, AnimDataManager animDManager)
-		{
-			this.ProjectManager = projManager;
-			this.AnimSetDataManager = animSDManager;
-			this.AnimDataManager = animDManager;
-		}
-		public void AssembleEdit(ChangeType changeType, XElement element, PackFileChangeSet changeSet)
-		{
-			XAttribute? pathAttribute = element.Attribute("path");
-			if (pathAttribute == null) { return; }
+        XAttribute? textAttribute = element.Attribute("text");
+        XAttribute? preTextAttribute = element.Attribute("preText");
 
-			bool isPathEmpty = string.IsNullOrWhiteSpace(pathAttribute.Value);
+        switch (changeType)
+        {
+            case ChangeType.Remove:
+                if (textAttribute == null)
+                {
+                    changeSet.AddChange(new RemoveElementChange(pathAttribute.Value));
+                    break;
+                }
+                //assume text
+                if (string.IsNullOrWhiteSpace(element.Value) || string.IsNullOrWhiteSpace(textAttribute.Value)) { break; }
 
-			XAttribute? textAttribute = element.Attribute("text");
-			XAttribute? preTextAttribute = element.Attribute("preText");
+                if (preTextAttribute == null)
+                {
+                    changeSet.AddChange(new RemoveTextChange(pathAttribute.Value, textAttribute.Value));
+                    break;
+                }
+                changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, preTextAttribute.Value, textAttribute.Value, string.Empty));
 
-			switch (changeType)
-			{
-				case ChangeType.Remove:
-					if (textAttribute == null)
-					{
-						changeSet.AddChange(new RemoveElementChange(pathAttribute.Value));
-						break;
-					}
-					//assume text
-					if (String.IsNullOrWhiteSpace(element.Value) || String.IsNullOrWhiteSpace(textAttribute.Value)) { break; }
+                break;
 
-					if (preTextAttribute == null)
-					{
-						changeSet.AddChange(new RemoveTextChange(pathAttribute.Value, textAttribute.Value));
-						break;
-					}
-					changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, preTextAttribute.Value, textAttribute.Value, string.Empty));
+            case ChangeType.Insert:
+                if (element.IsEmpty) { break; }
+                if (element.HasElements)
+                {
+                    if (!isPathEmpty)
+                    {
+                        foreach (XElement childElement in element.Elements()) { changeSet.AddChange(new InsertElementChange(pathAttribute.Value, childElement)); }
+                        break;
+                    }
 
-					break;
+                    foreach (XElement childElement in element.Elements()) { changeSet.AddChange(new PushElementChange(PackFile.ROOT_CONTAINER_NAME, element)); }
+                    break;
+                }
+                if (textAttribute == null || isPathEmpty) { break; }
 
-				case ChangeType.Insert:
-					if (element.IsEmpty) { break; }
-					if (element.HasElements)
-					{
-						if (!isPathEmpty)
-						{
-							foreach (var childElement in element.Elements()) { changeSet.AddChange(new InsertElementChange(pathAttribute.Value, childElement)); }
-							break;
-						}
+                changeSet.AddChange(new InsertTextChange(pathAttribute.Value, textAttribute.Value, element.Value));
 
-						foreach (var childElement in element.Elements()) { changeSet.AddChange(new PushElementChange(PackFile.ROOT_CONTAINER_NAME, element)); }
-						break;
-					}
-					if (textAttribute == null || isPathEmpty) { break; }
+                break;
+            case ChangeType.Append:
+                if (element.IsEmpty) { break; }
+                if (element.HasElements)
+                {
+                    if (!isPathEmpty)
+                    {
+                        foreach (XElement childElement in element.Elements()) { changeSet.AddChange(new AppendElementChange(pathAttribute.Value, childElement)); }
+                        break;
+                    }
 
-					changeSet.AddChange(new InsertTextChange(pathAttribute.Value, textAttribute.Value, element.Value));
+                    foreach (XElement childElement in element.Elements()) { changeSet.AddChange(new PushElementChange(PackFile.ROOT_CONTAINER_NAME, element)); }
+                    break;
+                }
 
-					break;
-				case ChangeType.Append:
-					if (element.IsEmpty) { break; }
-					if (element.HasElements)
-					{
-						if (!isPathEmpty)
-						{
-							foreach (var childElement in element.Elements()) { changeSet.AddChange(new AppendElementChange(pathAttribute.Value, childElement));  }
-							break;
-						}
+                if (isPathEmpty) { break; }
+                changeSet.AddChange(new AppendTextChange(pathAttribute.Value, element.Value));
 
-						foreach (var childElement in element.Elements()) { changeSet.AddChange(new PushElementChange(PackFile.ROOT_CONTAINER_NAME, element)); }
-						break;
-					}
+                break;
 
-					if (isPathEmpty) { break; }
-					changeSet.AddChange(new AppendTextChange(pathAttribute.Value, element.Value));
+            case ChangeType.Replace:
+                if (element.IsEmpty || isPathEmpty) { break; }
+                if (textAttribute == null && element.HasElements)
+                {
+                    foreach (XElement childElement in element.Elements()) { changeSet.AddChange(new ReplaceElementChange(pathAttribute.Value, new XElement(childElement))); }
+                    break;
+                }
+                if (textAttribute == null) { break; }
+                if (preTextAttribute == null)
+                {
+                    changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, string.Empty, textAttribute.Value, element.Value));
+                    break;
+                }
+                changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, preTextAttribute.Value, textAttribute.Value, element.Value));
+                break;
 
-					break;
+            default:
+                break;
 
-				case ChangeType.Replace:
-					if (element.IsEmpty || isPathEmpty) { break; }
-					if (textAttribute == null && element.HasElements)
-					{
-						foreach(var childElement in element.Elements()) { changeSet.AddChange(new ReplaceElementChange(pathAttribute.Value, new XElement(childElement))); } 
-						break;
-					}
-					if (textAttribute == null) { break; }
-					if (preTextAttribute == null)
-					{
-						changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, string.Empty, textAttribute.Value, element.Value));
-						break;
-					}
-					changeSet.AddChange(new ReplaceTextChange(pathAttribute.Value, preTextAttribute.Value, textAttribute.Value, element.Value));
-					break;
+        }
+    }
 
-				default:
-					break;
+    public void AssembleTypedEdits(ChangeType changeType, XElement container, PackFileChangeSet changeSet)
+    {
+        foreach (XElement element in container.Elements())
+        {
+            this.AssembleEdit(changeType, element, changeSet);
+        }
+    }
 
+    public void AssembleEdits(XElement container, PackFileChangeSet changeSet)
+    {
+        if (!container.HasElements) { return; }
+        foreach (XElement element in container.Elements())
+        {
 
-			}
-		}
+            if (changeTypeNameMap.TryGetValue(element.Name.ToString(), out ChangeType changeType))
+            {
+                if (element.HasAttributes)
+                {
+                    this.AssembleEdit(changeType, element, changeSet);
+                    continue;
+                }
+                this.AssembleTypedEdits(changeType, element, changeSet);
+                continue;
+            }
+            this.AssembleEdits(element, changeSet);
 
-		public void AssembleTypedEdits(ChangeType changeType, XElement container, PackFileChangeSet changeSet)
-		{
-			foreach (var element in container.Elements())
-			{
-				AssembleEdit(changeType, element, changeSet);
-			}
-		}
+        }
+    }
+    public bool AssemblePackFilePatch(FileInfo file, IModInfo modInfo)
+    {
 
-		public void AssembleEdits(XElement container, PackFileChangeSet changeSet)
-		{
-			if (!container.HasElements) { return; }	
-			foreach (var element in container.Elements())
-			{
+        string name = Path.GetFileNameWithoutExtension(file.Name);
+        PackFile targetPackFile;
+        if (!this.ProjectManager.TryActivatePackFile(name, out targetPackFile!)) { return false; }
 
-				if (changeTypeNameMap.TryGetValue(element.Name.ToString(), out ChangeType changeType))
-				{
-					if (element.HasAttributes) 
-					{
-						AssembleEdit(changeType, element, changeSet);
-						continue;
-					}
-					AssembleTypedEdits(changeType, element, changeSet);
-					continue;
-				}
-				AssembleEdits(element, changeSet);
-				
-			}
-		}
-		public bool AssemblePackFilePatch(FileInfo file, IModInfo modInfo)
-		{
+        PackFileChangeSet changeSet = new(modInfo);
 
-			var name = Path.GetFileNameWithoutExtension(file.Name);
-			PackFile targetPackFile; 
-			if (!ProjectManager.TryActivatePackFile(name, out targetPackFile!)) { return false; }
+        XElement container;
+        using (FileStream stream = file.OpenRead())
+        {
+            container = XElement.Load(stream);
+        }
+        XElement editContainer = container;
 
-			var changeSet = new PackFileChangeSet(modInfo);
+        if (editContainer == null) { return false; }
 
-			XElement container;
-			using (FileStream stream = file.OpenRead())
-			{
-				container = XElement.Load(stream);
-			}
-			var editContainer = container;
+        this.AssembleEdits(editContainer, changeSet);
 
-			if (editContainer == null) { return false;  }
+        targetPackFile.Dispatcher.AddChangeSet(changeSet);
+        return true;
+    }
+    public void AssemblePatch(IModInfo modInfo)
+    {
+        DirectoryInfo patchFolder = new(Path.Join(modInfo.Folder.FullName, "patches"));
+        foreach (FileInfo file in patchFolder.GetFiles("*.xml"))
+        {
+            _ = this.AssemblePackFilePatch(file, modInfo);
+        }
+    }
+    public void AssembleAnimDataPatch(DirectoryInfo folder)
+    {
+        FileInfo[] files = folder.GetFiles();
+        foreach (FileInfo file in files)
+        {
+            if (!file.Exists || !this.ProjectManager.TryGetProject(Path.GetFileNameWithoutExtension(file.Name.ToLower()), out Project? targetProject))
+            {
+                continue;
+            }
 
-			AssembleEdits(editContainer, changeSet);
+            using FileStream readStream = file.OpenRead();
+            using StreamReader reader = new(readStream);
+            string? expectedLine;
+            while ((expectedLine = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(expectedLine))
+                {
+                    continue;
+                }
 
-			targetPackFile.Dispatcher.AddChangeSet(changeSet);
-			return true;
-		}
-		public void AssemblePatch(IModInfo modInfo)
-		{
-			var patchFolder = new DirectoryInfo(Path.Join(modInfo.Folder.FullName, "patches"));
-			foreach( var file in patchFolder.GetFiles("*.xml"))
-			{
-				AssemblePackFilePatch(file, modInfo);
-			}
-		}
-		public void AssembleAnimDataPatch(DirectoryInfo folder)
-		{
-			var files = folder.GetFiles();
-			foreach (var file in files)
-			{
-				Project? targetProject;
-				if (!file.Exists || !ProjectManager.TryGetProject(Path.GetFileNameWithoutExtension(file.Name.ToLower()), out targetProject)) continue;
+                targetProject!.AnimData?.AddDummyClipData(expectedLine);
+            }
+        }
+    }
+    public void AssembleAnimSetDataPatch(DirectoryInfo directoryInfo) //not exactly Nemesis format but this format is just simpler
+    {
 
-				using (var readStream = file.OpenRead())
-				{
-					using (var reader = new StreamReader(readStream))
-					{
-						string? expectedLine;
-						while ((expectedLine = reader.ReadLine()) != null)
-						{
-							if (String.IsNullOrWhiteSpace(expectedLine)) continue;
-							targetProject!.AnimData?.AddDummyClipData(expectedLine);
-						}
-					}
-				}
-			}
-		}
-		public void AssembleAnimSetDataPatch(DirectoryInfo directoryInfo) //not exactly Nemesis format but this format is just simpler
-		{
-			ProjectAnimSetData? targetAnimSetData;
+        foreach (DirectoryInfo subDirInfo in directoryInfo.GetDirectories())
+        {
+            if (!this.AnimSetDataManager.AnimSetDataMap.TryGetValue(subDirInfo.Name, out ProjectAnimSetData? targetAnimSetData))
+            {
+                return;
+            }
 
-			foreach (DirectoryInfo subDirInfo in directoryInfo.GetDirectories())
-			{
-				if (!AnimSetDataManager.AnimSetDataMap.TryGetValue(subDirInfo.Name, out targetAnimSetData)) return;
-				var patchFiles = subDirInfo.GetFiles();
+            FileInfo[] patchFiles = subDirInfo.GetFiles();
 
-				foreach (var patchFile in patchFiles)
-				{
-					AnimSet? targetAnimSet;
-					if (!targetAnimSetData.AnimSetsByName.TryGetValue(patchFile.Name, out targetAnimSet)) continue;
+            foreach (FileInfo patchFile in patchFiles)
+            {
+                if (!targetAnimSetData.AnimSetsByName.TryGetValue(patchFile.Name, out AnimSet? targetAnimSet))
+                {
+                    continue;
+                }
 
-					using (var readStream = patchFile.OpenRead())
-					{
+                using FileStream readStream = patchFile.OpenRead();
 
-						using (var reader = new StreamReader(readStream))
-						{
+                using StreamReader reader = new(readStream);
 
-							string? expectedPath;
-							while ((expectedPath = reader.ReadLine()) != null)
-							{
-								if (string.IsNullOrWhiteSpace(expectedPath)) continue;
+                string? expectedPath;
+                while ((expectedPath = reader.ReadLine()) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(expectedPath))
+                    {
+                        continue;
+                    }
 
-								string animationName = Path.GetFileNameWithoutExtension(expectedPath);
-								string folder = Path.GetDirectoryName(expectedPath)!;
-								var animInfo = SetCachedAnimInfo.Encode(folder, animationName);
-								targetAnimSet.AddAnimInfo(animInfo);
-							}
+                    string animationName = Path.GetFileNameWithoutExtension(expectedPath);
+                    string folder = Path.GetDirectoryName(expectedPath)!;
+                    SetCachedAnimInfo animInfo = SetCachedAnimInfo.Encode(folder, animationName);
+                    targetAnimSet.AddAnimInfo(animInfo);
+                }
+            }
+        }
 
-						}
-					}
-				}
-			}
-
-
-
-
-		}
-	}
+    }
 }

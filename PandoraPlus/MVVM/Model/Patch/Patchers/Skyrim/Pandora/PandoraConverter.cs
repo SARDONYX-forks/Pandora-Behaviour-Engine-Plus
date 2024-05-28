@@ -1,59 +1,58 @@
-﻿using Pandora.Core.Patchers.Skyrim;
+﻿using System.IO;
+using Pandora.Core.Patchers.Skyrim;
 using Pandora.Patch.Patchers.Skyrim.AnimData;
 using Pandora.Patch.Patchers.Skyrim.AnimSetData;
 using Pandora.Patch.Patchers.Skyrim.Hkx;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Pandora.Patch.Patchers.Skyrim.Pandora
+namespace Pandora.Patch.Patchers.Skyrim.Pandora;
+
+public class PandoraConverter
 {
-	public class PandoraConverter
-	{
 
-		public PandoraAssembler Assembler { get; private set; }
+    public PandoraAssembler Assembler { get; private set; }
 
-		public PandoraConverter(ProjectManager projManager, AnimSetDataManager animSDManager, AnimDataManager animDManager) => Assembler = new PandoraAssembler(projManager, animSDManager, animDManager);
+    public PandoraConverter(ProjectManager projManager, AnimSetDataManager animSDManager, AnimDataManager animDManager)
+    {
+        this.Assembler = new PandoraAssembler(projManager, animSDManager, animDManager);
+    }
 
-		public void TryGraphInjection(DirectoryInfo folder, PackFile packFile, PackFileChangeSet changeSet)
-		{
-			DirectoryInfo injectFolder = new DirectoryInfo($"{folder.FullName}\\inject");
-			if (!injectFolder.Exists) { return; }
+    public static void TryGraphInjection(DirectoryInfo folder, PackFile packFile, PackFileChangeSet changeSet)
+    {
+        DirectoryInfo injectFolder = new($"{folder.FullName}\\inject");
+        if (!injectFolder.Exists) { return; }
 
+        //Assembler.AssembleGraphInjection(injectFolder, packFile, changeSet);
+    }
 
-			//Assembler.AssembleGraphInjection(injectFolder, packFile, changeSet);
-		}
+    public static void TryGenerateAnimDataPatchFile(DirectoryInfo folder)
+    {
+        DirectoryInfo? parentFolder = folder.Parent;
+        if (parentFolder == null)
+        {
+            return;
+        }
 
-		
-		public void TryGenerateAnimDataPatchFile(DirectoryInfo folder)
-		{
-			var parentFolder = folder.Parent;
-			if (parentFolder == null) return;
-			
+        FileInfo patchFile = new($"{parentFolder.FullName}\\{folder.Name.Split('~')[0]}.txt");
+        if (patchFile.Exists)
+        {
+            return;
+        }
 
-			FileInfo patchFile = new FileInfo($"{parentFolder.FullName}\\{folder.Name.Split('~')[0]}.txt");
-			if (patchFile.Exists) return;
+        using FileStream writeStream = patchFile.OpenWrite();
+        using StreamWriter writer = new(writeStream);
+        FileInfo[] files = folder.GetFiles();
+        foreach (FileInfo file in files)
+        {
+            string clipName = file.Name.Split('~')[0];
 
-			using (var writeStream = patchFile.OpenWrite())
-			{
-				using (var writer =  new StreamWriter(writeStream))
-				{
-					var files = folder.GetFiles();
-					foreach (var file in files)
-					{
-						var clipName = file.Name.Split('~')[0];
+            if (clipName.Contains('$'))
+            {
+                continue;
+            }
 
-						if (clipName.Contains('$')) continue;
+            writer.WriteLine(clipName);
 
-						writer.WriteLine(clipName);
+        }
 
-					}
-				}
-			}
-
-		}
-	}
+    }
 }

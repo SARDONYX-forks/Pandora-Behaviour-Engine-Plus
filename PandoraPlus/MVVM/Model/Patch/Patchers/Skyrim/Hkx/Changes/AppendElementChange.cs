@@ -1,40 +1,44 @@
-﻿using Pandora.Core;
-using System;
-using System.Xml;
+﻿using System.Xml;
 using System.Xml.Linq;
 
 namespace Pandora.Patch.Patchers.Skyrim.Hkx;
 
 public class AppendElementChange : IPackFileChange
 {
-	public IPackFileChange.ChangeType Type { get; } = IPackFileChange.ChangeType.Append;
+    public IPackFileChange.ChangeType Type { get; } = IPackFileChange.ChangeType.Append;
 
-	public XmlNodeType AssociatedType { get; } = XmlNodeType.Element;
+    public XmlNodeType AssociatedType { get; } = XmlNodeType.Element;
 
-	public string Path { get; private set; }
+    public string Path { get; private set; }
 
-	private XElement element { get; set; }
+    private XElement element { get; set; }
 
+    public AppendElementChange(string path, XElement element)
+    {
+        this.Path = path;
+        this.element = element;
+    }
+    public bool Apply(PackFile packFile)
+    {
 
+        if (!packFile.Map.PathExists(this.Path))
+        {
+            return false;
+        }
 
-	public AppendElementChange(string path, XElement element)
-	{
-		Path = path;
-		this.element = element;
-	}
-	public bool Apply(PackFile packFile)
-	{
+        string newPath = PackFileEditor.AppendElement(packFile, this.Path, this.element);
+        this.Path = string.IsNullOrEmpty(newPath) ? this.Path : newPath;
+        return packFile.Map.PathExists(this.Path);
+    }
 
-		if (!packFile.Map.PathExists(Path)) return false;
-		string newPath = PackFileEditor.AppendElement(packFile, Path, element);
-		Path = String.IsNullOrEmpty(newPath) ? Path : newPath;
-		return packFile.Map.PathExists(Path);
-	}
+    public bool Revert(PackFile packFile)
+    {
+        if (!packFile.Map.PathExists(this.Path))
+        {
+            return false;
+        }
 
-	public bool Revert(PackFile packFile)
-	{
-		if (!packFile.Map.PathExists(Path)) return false;
-		PackFileEditor.RemoveElement(packFile, Path);
-		return true;
-	}
+        _ = PackFileEditor.RemoveElement(packFile, this.Path);
+        return true;
+    }
 }

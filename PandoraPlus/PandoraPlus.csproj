@@ -9,6 +9,7 @@
     <RootNamespace>Pandora</RootNamespace>
     <AssemblyName>Pandora Behaviour Engine+</AssemblyName>
     <ApplicationIcon>butterfly_icon.ico</ApplicationIcon>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
   <ItemGroup>
