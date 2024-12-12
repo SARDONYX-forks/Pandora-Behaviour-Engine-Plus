@@ -86,7 +86,7 @@ Install [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dot
 <br/>
 
 ### Patch Order
-Pandora has a drag and drop priority system. Higher priority mods will overwrite conflicting changes from lower priority mods. Direct behaviour conflicts are rare, so manual resolving is almost never needed, but the option is there just in case. 
+Pandora has a drag and drop priority system. Higher priority mods will overwrite conflicting changes from lower priority mods. As patches go further down the list, priority increases. Direct behaviour conflicts are rare, so manual resolving is almost never needed, but the option is there just in case. 
 
 
 ### Mod Cache
@@ -119,6 +119,10 @@ Run the engine as administrator or move the engine install out of a protected lo
 **There are a lot of warnings in Engine.log!**
 
 Warnings are not a major issue unless they noticeably interfere with the in-game behavior in some shape or form. Please don't report warnings coming from other mods as a bug.
+
+**Pandora doesn't read FNIS mods!***
+
+Use the `-tesv:` argument if your game path is different from the registry path, or if you have multiple installs. Otherwise, ensure your registry path is correct. Read the [startup arguments](#startup-arguments) section for more information.
 
 <br/>
 <br/>

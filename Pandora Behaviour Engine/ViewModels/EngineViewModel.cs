@@ -18,6 +18,13 @@ using Pandora.Core.Engine.Configs;
 using System.Security.Policy;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia;
+using Pandora.API.Patch;
+using Pandora.API.Patch.Engine.Config;
+using System.Reflection;
+using System.Xml.Linq;
+using FluentAvalonia.UI.Controls;
+using Pandora.Views;
+using Avalonia.Controls;
 
 
 namespace Pandora.ViewModels
@@ -42,9 +49,7 @@ namespace Pandora.ViewModels
 
         public RelayCommand ToggleAllCommand { get; }
 
-
-
-		private List<IModInfo> mods = new();
+        private List<IModInfo> mods = new();
 		public List<IModInfo> Mods { 
             get => mods; 
             set
@@ -72,7 +77,14 @@ namespace Pandora.ViewModels
         }
 
 		private bool engineRunning = false;
-
+		public bool MenuEnabled 
+        { 
+            get => menuEnabled; 
+            private set
+            { 
+                SetProperty(ref menuEnabled, value);
+            } 
+        }
 		public bool EngineRunning
         {
             get => engineRunning; 
@@ -115,7 +127,7 @@ namespace Pandora.ViewModels
         private string cachedSearchText = string.Empty;
         private string searchText = "";
 		private string searchBGText = "Search";
-
+		private bool menuEnabled = false;
 
 		public string SearchText { get => searchText; 
             set 
@@ -168,7 +180,9 @@ namespace Pandora.ViewModels
             } 
         }
 
-        public void SortMods()
+		private static readonly char[] menuPathSeparators = new char[] { '/', '\\' };
+
+		public void SortMods()
 		{
             Mods = Mods.OrderBy(m => m.Code == "pandora").ThenBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList(); 
 		}
@@ -183,15 +197,15 @@ namespace Pandora.ViewModels
             LaunchCommand = new RelayCommand(LaunchEngine, CanLaunchEngine);
             ExitCommand = new RelayCommand(Exit);
             SetEngineConfigCommand = new RelayCommand(SetEngineConfiguration, CanLaunchEngine);
-            ToggleAllCommand = new RelayCommand(ToggleSelectAll); 
-			CultureInfo culture;
+            ToggleAllCommand = new RelayCommand(ToggleSelectAll);
+
+            CultureInfo culture;
 
 			culture = CultureInfo.CreateSpecificCulture("en-US");
 
 			CultureInfo.DefaultThreadCurrentCulture = culture;
 			CultureInfo.DefaultThreadCurrentUICulture = culture;
 			CultureInfo.CurrentCulture = culture;
-            SetupConfigurationOptions();
 			ReadStartupArguments();
 			activeModConfig = new FileInfo($"{currentDirectory}\\Pandora_Engine\\ActiveMods.txt");
 			preloadTask = Task.Run(Engine.PreloadAsync);
@@ -200,17 +214,51 @@ namespace Pandora.ViewModels
 
 
 		}
-        private void SetupConfigurationOptions()
+        private void SetupExternalConfigurationPlugin(IEngineConfigurationPlugin injection)
         {
-            engineConfigurationFactory = new EngineConfigurationViewModel<SkyrimConfiguration>("Normal", SetEngineConfigCommand);
+            if (string.IsNullOrEmpty(injection.MenuPath))
+            {
+                EngineConfigurationViewModels.Add(new EngineConfigurationViewModel(injection.Factory, SetEngineConfigCommand));
+                return;
+            }
+
+            string[] pathSegments = injection.MenuPath.Split(menuPathSeparators);
+            EngineConfigurationViewModelContainer? container = null;
+            int index = 0;
+			container = EngineConfigurationViewModels
+			    .Where(vm => vm.Name.Equals(pathSegments[index], StringComparison.OrdinalIgnoreCase)).FirstOrDefault()
+			    as EngineConfigurationViewModelContainer;
+			if (container == null)
+            {
+                container = new(pathSegments[index]);
+                EngineConfigurationViewModels.Add(container);
+            }
+			index++;
+			while (pathSegments.Length > index)
+			{
+				var tempContainer = container.NestedViewModels
+				.Where(vm => vm.Name.Equals(pathSegments[index], StringComparison.OrdinalIgnoreCase)).FirstOrDefault()
+as EngineConfigurationViewModelContainer;
+				if (tempContainer == null)
+				{
+					tempContainer = new EngineConfigurationViewModelContainer(pathSegments[index]);
+					container.NestedViewModels.Add(tempContainer);
+				}
+				container = tempContainer;
+                index++;
+			}
+            container.NestedViewModels.Add(new EngineConfigurationViewModel(injection.Factory, SetEngineConfigCommand));
+        }
+        private async Task SetupConfigurationOptions()
+        {
+            engineConfigurationFactory = new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimConfiguration>("Normal"), SetEngineConfigCommand);
 
 			EngineConfigurationViewModels.Add(
-                new EngineConfigurationViewModelContainer("Skyrim SE/AE",
+                new EngineConfigurationViewModelContainer("Skyrim 64",
                     new EngineConfigurationViewModelContainer("Behavior", 
-
                         new EngineConfigurationViewModelContainer("Patch",
-                            (EngineConfigurationViewModel<SkyrimConfiguration>)engineConfigurationFactory,
-                            new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Debug", SetEngineConfigCommand)
+                            (EngineConfigurationViewModel)engineConfigurationFactory,
+                            new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimDebugConfiguration>("Debug"), SetEngineConfigCommand)
                         )
                         //,
                         //new EngineConfigurationViewModelContainer("Convert"
@@ -221,7 +269,16 @@ namespace Pandora.ViewModels
 					    )
 				    )
                 );
-			
+            
+            foreach (var configPlugin in BehaviourEngine.EngineConfigurations)
+            {
+                SetupExternalConfigurationPlugin(configPlugin);
+            }
+            if (BehaviourEngine.EngineConfigurations.Count > 0)
+            {
+                await WriteLogBoxLine("Plugins loaded.");
+            }
+            MenuEnabled = true;
 			//EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimConfiguration>("Skyrim SE/AE", SetEngineConfigCommand));
 			//EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Skyrim SE/AE Debug", SetEngineConfigCommand));
 		}
@@ -230,7 +287,8 @@ namespace Pandora.ViewModels
             var launchDirectory = BehaviourEngine.AssemblyDirectory.FullName;
             ModViewModels.Clear(); 
             Mods.Clear();
-
+            modsByCode.Clear();
+            var pluginsTask = SetupConfigurationOptions();
             List<IModInfo> modInfoList;
             {
                 HashSet<IModInfo> modInfos = new();
@@ -258,6 +316,7 @@ namespace Pandora.ViewModels
                 Mods.Add(modInfo);
                 ModViewModels.Add(new(modInfo)); 
             }
+            await pluginsTask;
 			await WriteLogBoxLine("Mods loaded.");
 		}
 
@@ -295,7 +354,7 @@ namespace Pandora.ViewModels
         {
             if (startupArguments.Remove("-skyrimDebug64"))
             {
-                engineConfigurationFactory = new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Debug", SetEngineConfigCommand);
+                engineConfigurationFactory = new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimDebugConfiguration>("Debug"), SetEngineConfigCommand);
                 Engine = new BehaviourEngine(engineConfigurationFactory.Config);
 			}
             if (startupArguments.Remove("-autoClose"))

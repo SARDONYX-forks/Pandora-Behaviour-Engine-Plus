@@ -1,4 +1,6 @@
 ﻿using Microsoft.Win32;
+using Pandora.API.Patch;
+using Pandora.API.Patch.Engine.Config;
 using Pandora.Core.Engine.Configs;
 using System;
 using System.Collections.Generic;
@@ -7,17 +9,66 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-
+using System.Reflection;
+using Pandora.Models.Patch.Engine;
+using Pandora.Models.Patch.Engine.Plugins;
+using System.Diagnostics;
 namespace Pandora.Core
 {
 	public class BehaviourEngine
 	{
+		private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+		private static readonly PluginLoader pluginLoader = new PluginLoader();
+
 		public static readonly DirectoryInfo AssemblyDirectory = new FileInfo(System.Reflection.Assembly.GetEntryAssembly()!.Location).Directory!;
+
+		public static readonly List<IEngineConfigurationPlugin> EngineConfigurations = new List<IEngineConfigurationPlugin>();
 
 		public readonly static DirectoryInfo? SkyrimGameDirectory; 
 
+		private static void AddConfigurations(Assembly assembly)
+		{
+			foreach(Type type in assembly.GetTypes())
+			{
+				if (typeof(IEngineConfigurationPlugin).IsAssignableFrom(type))
+				{
+					IEngineConfigurationPlugin? result = Activator.CreateInstance(type) as IEngineConfigurationPlugin;
+					if (result != null)
+					{
+						EngineConfigurations.Add(result);
+					}
+				}
+			}
+		}
+		private static void LoadPlugins()
+		{
+			
+			var pluginsDirectory = AssemblyDirectory.CreateSubdirectory("Plugins");
+			Assembly assembly;
+			foreach (DirectoryInfo pluginDirectory in pluginsDirectory.EnumerateDirectories())
+			{
+#if DEBUG
+				// only for debug. DO NOT introduce json field plugin loading to release builds 
+				IMetaPluginLoader metaPluginLoader = new JsonPluginLoader();
+
+				if (!metaPluginLoader.TryLoadMetadata(pluginDirectory, out var pluginInfo))
+				{
+					continue; 
+				}
+				assembly = metaPluginLoader.LoadPlugin(pluginDirectory, pluginInfo);
+#else
+				assembly = pluginLoader.LoadPlugin(pluginDirectory);
+#endif
+				AddConfigurations(assembly);
+			}
+		}
+		private void ReadSkyrimPath()
+		{
+
+		}
 		static BehaviourEngine()
 		{
+			LoadPlugins(); 
 			if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
 			{
 				var subKey = "SOFTWARE\\Wow6432Node\\Bethesda Softworks\\Skyrim Special Edition";
@@ -64,7 +115,8 @@ namespace Pandora.Core
         }
         public void Launch(List<IModInfo> mods)
 		{
-
+			logger.Info($"Launching with configuration {Configuration.Name}");
+			logger.Info($"Launching with patcher {Configuration.Patcher.GetVersionString()}");
 			Configuration.Patcher.SetTarget(mods); 
 			Configuration.Patcher.Update(); 
 			Configuration.Patcher.Run();
@@ -72,6 +124,8 @@ namespace Pandora.Core
 
 		public async Task<bool> LaunchAsync(List<IModInfo> mods)
 		{
+			logger.Info($"Launching with configuration {Configuration.Name}");
+			logger.Info($"Launching with patcher version {Configuration.Patcher.GetVersionString()}");
 			Configuration.Patcher.SetTarget(mods);
 
 			if (!OutputPath.Exists) OutputPath.Create();
