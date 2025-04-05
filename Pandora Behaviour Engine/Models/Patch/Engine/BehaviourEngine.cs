@@ -22,6 +22,8 @@ namespace Pandora.Core
 
 		public static readonly DirectoryInfo AssemblyDirectory = new FileInfo(System.Reflection.Assembly.GetEntryAssembly()!.Location).Directory!;
 
+		public static readonly DirectoryInfo CurrentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory()!);
+
 		public static readonly List<IEngineConfigurationPlugin> EngineConfigurations = new List<IEngineConfigurationPlugin>();
 
 		public readonly static DirectoryInfo? SkyrimGameDirectory; 
@@ -42,10 +44,15 @@ namespace Pandora.Core
 		}
 		private static void LoadPlugins()
 		{
-			
-			var pluginsDirectory = AssemblyDirectory.CreateSubdirectory("Plugins");
-			Assembly assembly;
-			foreach (DirectoryInfo pluginDirectory in pluginsDirectory.EnumerateDirectories())
+
+			var pluginsDirectory = new DirectoryInfo(Path.Join(AssemblyDirectory.FullName, "Plugins")); 
+			if (!pluginsDirectory.Exists)
+			{
+				return; 
+			}
+			Assembly? assembly;
+			var subDirectories = pluginsDirectory.GetDirectories();
+			foreach (DirectoryInfo pluginDirectory in subDirectories)
 			{
 #if DEBUG
 				// only for debug. DO NOT introduce json field plugin loading to release builds 
@@ -53,13 +60,13 @@ namespace Pandora.Core
 
 				if (!metaPluginLoader.TryLoadMetadata(pluginDirectory, out var pluginInfo))
 				{
-					continue; 
+					continue;
 				}
 				assembly = metaPluginLoader.LoadPlugin(pluginDirectory, pluginInfo);
 #else
-				assembly = pluginLoader.LoadPlugin(pluginDirectory);
+							assembly = pluginLoader.LoadPlugin(pluginDirectory);
 #endif
-				AddConfigurations(assembly);
+				if (assembly != null) { AddConfigurations(assembly); }
 			}
 		}
 		private void ReadSkyrimPath()
@@ -96,7 +103,6 @@ namespace Pandora.Core
 
 		public IEngineConfiguration Configuration { get; private set; } = new SkyrimConfiguration();
 		public bool IsExternalOutput = false; 
-        private DirectoryInfo CurrentDirectory { get; } = new DirectoryInfo(Directory.GetCurrentDirectory());
         public DirectoryInfo OutputPath { get; private set; } = new DirectoryInfo(Directory.GetCurrentDirectory());
         public void SetOutputPath(DirectoryInfo outputPath)
 		{

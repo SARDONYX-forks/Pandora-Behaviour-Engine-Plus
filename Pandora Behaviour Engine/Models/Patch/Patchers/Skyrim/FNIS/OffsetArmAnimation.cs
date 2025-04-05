@@ -18,16 +18,16 @@ public class OffsetArmAnimation : FNISAnimation
 	{
 		var project = buildContext.TargetProject;
 		var projectManager = buildContext.ProjectManager;
-		base.BuildPatch(buildContext);
+		var modInfo = buildContext.ModInfo;
 
-		if (!project.TryLookupPackFile("mt_behavior", out var targetPackFile) || targetPackFile is not PackFileGraph graph) //only supports humanoids as FNIS does
+		if (!base.BuildPatch(buildContext) || !project.TryLookupPackFile("mt_behavior", out var targetPackFile) || targetPackFile is not PackFileGraph graph) //only supports humanoids as FNIS does
 		{
 			return false;
 		}
 		projectManager.TryActivatePackFile(targetPackFile);
 		hkbClipGenerator clipGenerator = new()
 		{
-			name = GraphEvent,
+			name = $"{modInfo}_{GraphEvent}_Clip",
 			animationName = AnimationFilePath,
 			triggers = null,
 			cropStartAmountLocalTime = 0.0f,
@@ -38,18 +38,19 @@ public class OffsetArmAnimation : FNISAnimation
 			userControlledTimeFraction = 0.0f,
 			animationBindingIndex = 0,
 			flags = 0,
-			userData = 0
+			userData = 0, 
+			mode = (sbyte)PlaybackMode.MODE_LOOPING,
 		};
-		hkbStateMachineStateInfo stateInfo = new hkbStateMachineStateInfo() 
+		hkbStateMachineStateInfo stateInfo = new() 
 		{ 
-			name = GraphEvent, 
+			name = $"{GraphEvent}_StateInfo", 
 			probability = 1.0f, 
 			generator = clipGenerator, 
-			stateId = (clipGenerator.name.GetHashCode() & 0xfffffff), 
+			stateId = GetPositiveHash(clipGenerator.name), 
 			enable = true, 
 			transitions = graph.GetPushedObjectAs<hkbStateMachineTransitionInfoArray>("#5111")
 		};
-		hkbStateMachine rightArmState = graph.GetPushedObjectAs<hkbStateMachine>("#5138");
+		hkbStateMachine rightArmState = graph.GetPushedObjectAs<hkbStateMachine>("#5138"); // possible crash here.
 		hkbStateMachine leftArmState = graph.GetPushedObjectAs<hkbStateMachine>("#5183");
 		lock (rightArmState){ rightArmState.states.Add(stateInfo); }
 		lock (leftArmState) { leftArmState.states.Add(stateInfo); }

@@ -23,9 +23,9 @@ public class FurnitureAnimation : FNISAnimation
 	{
 		var project = buildContext.TargetProject;
 		var projectManager = buildContext.ProjectManager;
-		base.BuildPatch(buildContext);
+		var modInfo = buildContext.ModInfo;
 
-		if (NextAnimation == null || !project.TryLookupPackFile("mt_behavior", out var targetPackFile) || targetPackFile is not PackFileGraph graph) //only supports humanoids as FNIS does
+		if (!base.BuildPatch(buildContext) || NextAnimation == null || !project.TryLookupPackFile("mt_behavior", out var targetPackFile) || targetPackFile is not PackFileGraph graph) //only supports humanoids as FNIS does
 		{
 			return false;
 		}
@@ -54,13 +54,14 @@ public class FurnitureAnimation : FNISAnimation
 				}
 			}
 		};
-		int stateId = GetPositiveHash(GraphEvent);
+		string uniqueStateInfoName = $"{modInfo.Code}_{GraphEvent}_State"; 
+		int stateId = GetPositiveHash(uniqueStateInfoName);
 
 		hkbStateMachineStateInfo furnitureGroupStateInfo = new() 
 		{ 
-			name = $"Pandora_{GraphEvent}_FurnitureState", 
+			name = uniqueStateInfoName, 
 			generator = furnitureBehaviorState, 
-			stateId = GetPositiveHash(GraphEvent),
+			stateId = stateId,
 			variableBindingSet = bindingSet
 			//transitions = graph.GetPushedObjectAs<hkbStateMachineTransitionInfoArray>("#4005")
 		};
@@ -186,13 +187,13 @@ public class FurnitureAnimation : FNISAnimation
 			stateInfo = new()
 			{
 				name = $"{animation.GraphEvent}_State",
-				stateId = stateId,
 				generator = clipGenerator,
 				transitions = exitTransitionInfoArray,
 			};
 			stateInfo.SetDefault();
 			animation.BuildFlags(stateInfo, clipGenerator);
 			stateId = furnitureBehaviorState.AddDefaultStateInfo(stateInfo);
+			stateInfo.stateId = stateId;
 
 			if (first)
 			{
