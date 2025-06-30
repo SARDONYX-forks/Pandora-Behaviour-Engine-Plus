@@ -1,34 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using Pandora.API.Patch;
+using Pandora.Models.Patch.Mod;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Pandora.Core;
-using Pandora.API.Patch;
-namespace Pandora.MVVM.Data;
 
-public class NemesisModInfoProvider : IModInfoProvider
+namespace Pandora.Data;
+
+public class NemesisModInfoProvider : FileBasedModInfoProvider
 {
-    public async Task<List<IModInfo>> GetInstalledMods(string folderPath) => await Task.Run(() => GetInstalledMods(new DirectoryInfo(folderPath)));
+	protected override string InfoFileName => "info.ini";
 
-    private static List<IModInfo> GetInstalledMods(DirectoryInfo folder)
-    {
-		List<IModInfo> infoList = new List<IModInfo>();
-        if (!folder.Exists) { return infoList;  }
+	public override string SingleRelativePath => Path.Join("Nemesis_Engine", "mod");
 
-        var modFolders = folder.GetDirectories();
-
-        foreach( var modFolder in modFolders ) 
-        {
-            var infoFile = new FileInfo(Path.Join(modFolder.FullName, "info.ini"));
-            if (!infoFile.Exists || infoFile.Directory is null) 
-            { 
-                continue; 
-            }
-            infoList.Add(NemesisModInfo.ParseMetadata(infoFile));
-        }
-
-        return infoList;
+	protected override Task<IModInfo?> TryParseAsync(FileInfo infoFile)
+	{
+		IModInfo? mod = NemesisModInfo.ParseMetadata(infoFile);
+		return Task.FromResult(mod);
 	}
 }

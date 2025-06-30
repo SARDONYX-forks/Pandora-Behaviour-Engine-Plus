@@ -1,17 +1,16 @@
-using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
+using Avalonia.ReactiveUI;
+using Pandora.ViewModels;
 
 namespace Pandora.Views;
 
-public partial class LogBox : UserControl
+public partial class LogBox : ReactiveUserControl<EngineViewModel>
 {
     public LogBox()
     {
         InitializeComponent();
     }
-	private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
-	{
+
+	private void TextBox_TextChanged(object sender, TextChangedEventArgs e) => 
 		LogTextBox.CaretIndex = int.MaxValue;
-	}
 }

@@ -1,21 +1,23 @@
 # Pandora Behaviour Engine+
+<p>
+    <a href="https://github.com/Monitor144hz/Pandora-Behaviour-Engine-Plus/actions/workflows/build.yaml" target="_blank"><img src="https://github.com/Monitor221hz/Pandora-Behaviour-Engine-Plus/actions/workflows/build.yaml/badge.svg?branch=main&event=pull_request" alt="Build"></a>
+    <a href="https://discord.gg/8nUQCWMn3w" target="_blank"><img src="https://img.shields.io/discord/1218265541106466826?logo=discord&logoColor=white&color=7289da" alt="Discord"></a>
+</p>
 
-<div>
-    <a href="https://github.com/Monitor144hz/Pandora-Behaviour-Engine-Plus/actions/workflows/build.yaml" target="_blank">
-        <img src="https://github.com/Monitor144hz/Pandora-Behaviour-Engine-Plus/actions/workflows/build.yaml/badge.svg" alt="Build">
-    </a>
-    <a href="https://discord.gg/8nUQCWMn3w" target="_blank">
-        <img src="https://img.shields.io/discord/1218265541106466826?logo=discord&logoColor=white&color=7289da" alt="Discord">
-    </a>
-</div>
+### Download the [latest release here.](https://github.com/Monitor221hz/Pandora-Behaviour-Engine-Plus/releases/latest)
+### Or check out the [Nexus page to download with mod manager.](https://www.nexusmods.com/skyrimspecialedition/mods/133232)
 
 <br/>
 
-A modular and lightweight behavior engine for TES Skyrim SE, for creatures and humanoids.  
+A modular and lightweight behavior patching engine for Havok Behavior and Animation 2010-x64, including creatures and humanoids.  
 
-Built with backwards compatibility in mind for [Nemesis Unlimited Behavior Engine](https://github.com/ShikyoKira/Project-New-Reign---Nemesis-Main) and FNIS, Pandora is an alternative engine streamlines both the author and user experience through a simplified UI, robust logging, intuitive formats, and fast patching times. Pandora runs on Windows, Linux, and MacOS.
+Havok Behavior (`hkb`) and Havok Animation (`hka`) consist of multiple non-deterministic finite state machines, serialized in xml before being converted to "packed" binary files (`.hkx`). This program parses changes to nodes in xml, serializes them into the FSMs using native DTOs, validates nodes, and then outputs the files in a game-ready binary format. 
 
-<br/>
+It supports the patch formats of both Nemesis Behavior Engine and FNIS, two prior behavior engines, but also has its own standard format for making changes to files. It introduces an overall performance boost compared to its predecessors due to its [program architecture](https://github.com/Monitor221hz/Pandora-Behaviour-Engine-Plus/wiki/Performance-Notes), and also comes with a simplified, accessible graphical user interface. The program is also error-tolerant and any nodes that are not valid in layout after changes are made will simply be reverted to its original state in the final output.
+
+Pandora runs on Windows, Linux, and MacOS, but only Windows is extensively tested. Linux users on SteamOS or similar may want to use Proton to wrap the self-contained windows build. 
+
+
 <br/>
 
 ## Navigation
@@ -49,8 +51,6 @@ Built with backwards compatibility in mind for [Nemesis Unlimited Behavior Engin
 ## For Users
 
 ### Quickstart
-Install [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) if you do not have it installed.  
-
 <br/>
 
 <details>
@@ -74,13 +74,12 @@ Install [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dot
 <summary>Vortex Users</summary>
 <br/>
 
-1. Install Pandora Behaviour Engine outside of the mods folder.
-2. Add it to the tools dashboard.
-  2.a) It is highly recommended you set a custom output mod folder using `-o:{path}` in the 'Command Line' field.
-  2.b) Ensure that the 'Start In' field is set to the Skyrim data directory.
-4. Run the program either manually or after adding it to the tools dashboard.
-5. Tick the patches you want and click Launch. 
-
+1. Install Pandora Behaviour Engine outside of the mods folder.  
+2. Add it to the tools dashboard  
+   a) It is highly recommended you set a custom output mod folder using `--output "path"` in the 'Command Line' field  
+   b) Ensure that the 'Start In' field is set to the Skyrim data directory.  
+3. Run the program either manually or after adding it to the tools dashboard.
+4. Tick the patches you want and click Launch.
 </details>
 
 <br/>
@@ -90,7 +89,7 @@ Pandora has a drag and drop priority system. Higher priority mods will overwrite
 
 
 ### Mod Cache
-Pandora saves the active mods to an external cache file after the engine successfully finishes its patching process. When the cache is loaded, all active mods are shown at the top with relative priority preserved, for better readability. To clear the cache, delete `Pandora_Engine/ActiveMods.txt`. 
+Pandora saves the active mods to an external cache file after the engine successfully finishes its patching process. When the cache is loaded, all active mods are shown at the top with relative priority preserved, for better readability. To clear the cache, delete `Pandora_Engine/ActiveMods.json`. 
 
 
 
@@ -122,19 +121,43 @@ Warnings are not a major issue unless they noticeably interfere with the in-game
 
 **Pandora doesn't read FNIS mods!***
 
-Use the `-tesv:` argument if your game path is different from the registry path, or if you have multiple installs. Otherwise, ensure your registry path is correct. Read the [startup arguments](#startup-arguments) section for more information.
+Use the `--tesv` argument if your game path is different from the registry path, or if you have multiple installs. Otherwise, ensure your registry path is correct. Read the [startup arguments](#startup-arguments) section for more information.
 
 <br/>
 <br/>
 
 ## Startup Arguments
-Pandora has a variety of startup arguments to support customizability. 
-
-- `-autorun`: runs the engine using the same active mods as cached from the last successful run.
-- `-autoclose`: closes the engine automatically upon finishing a single launch.
-- `-skyrimDebug64`: produces debug `.xml` files alongside normal `.hkx` output. Only for authors that know what they're doing.
-- `-o:{output path}`: sets a custom output path.
-- `-tesv:{game path}`: sets the path to the game directory (the root folder containing the exe, not the data folder!). Intended for users with Wabbajack "[Stock Game](https://github.com/LivelyDismay/Learn-To-Mod/blob/main/lessons/Setting%20up%20Stock%20Game%20for%20Skyrim%20SE.md)" setup or with multiple installations.
+Pandora has a variety of startup arguments to support customizability.
+<table>
+    <thead>
+        <tr>
+            <th width="20%">Option</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>--auto_run</code></td>
+            <td>Runs the engine using the same active mods as cached from the last successful run.</td>
+        </tr>
+        <tr>
+            <td><code>--auto_close</code></td>
+            <td>Closes the engine automatically upon finishing a single launch.</td>
+        </tr>
+        <tr>
+            <td><code>--skyrim_debug64</code></td>
+            <td>Produces debug <code>.xml</code> files alongside normal <code>.hkx</code> output. Only for authors that know what they're doing.</td>
+        </tr>
+        <tr>
+            <td><code>--output</code>(or <code>-o</code>)</td>
+            <td>Sets a custom output path. Example: <code>-o "C:\path\Pandora Output"</code></td>
+        </tr>
+        <tr>
+            <td><code>--tesv</code></td>
+            <td>Sets the path to the game directory (the root folder containing the .exe, not the data folder!). Intended for users with Wabbajack "<a href="https://github.com/LivelyDismay/Learn-To-Mod/blob/main/lessons/Setting%20up%20Stock%20Game%20for%20Skyrim%20SE.md">Stock Game</a>" setup or with multiple installations.</td>
+        </tr>
+    </tbody>
+</table>
 
 ## For Mod Authors
 This section exists to inform current behavior authors of the key differences and features of Pandora, it's not a guide for making behavior mods.
@@ -145,18 +168,18 @@ Patches in the new Pandora format do not use multiple text files per behavior gr
 ```xml
 
 <patch>
-    <replace>
+  <replace>
     <edit path="#xxxx\...\..."><!-- content --></edit>
-    </replace>
-    <insert>
+  </replace>
+  <insert>
     <edit path="#xxxx\...\..."><!-- content --></edit>
-    </insert>
-    <append>
+  </insert>
+  <append>
     <edit path="#xxxx\...\..."><!-- content --></edit>
-    </append>
-    <loose>
+  </append>
+  <loose>
     <edit path="#xxxx\...\..."><!--content --></edit>
-    </loose>
+  </loose>
 </patch>
 ```
 Edits have the following format:
@@ -168,23 +191,23 @@ An example of a patch file:
 
 ```xml
 <patch>
-	<replace>
-		<edit path="#0885/legs/Element0/maxAnkleHeightMS">
-			<hkparam name="maxAnkleHeightMS">0.700000</hkparam>
-		</edit>
-		<edit path="#0885/legs/Element0/hipIndex">
-			<hkparam name="hipIndex">12</hkparam>
-		</edit>
-		<edit path="#0885/legs/Element0/kneeIndex">
-			<hkparam name="kneeIndex">13</hkparam>
-		</edit>
-		<edit path="#0885/legs/Element0/ankleIndex">
-			<hkparam name="ankleIndex">14</hkparam>
-		</edit>
-		<edit path="#0885/legs/Element0/isPlantedMS">
-			<hkparam name="isPlantedMS">false</hkparam>
-		</edit>
-	</replace>
+  <replace>
+    <edit path="#0885/legs/Element0/maxAnkleHeightMS">
+      <hkparam name="maxAnkleHeightMS">0.700000</hkparam>
+    </edit>
+    <edit path="#0885/legs/Element0/hipIndex">
+      <hkparam name="hipIndex">12</hkparam>
+    </edit>
+    <edit path="#0885/legs/Element0/kneeIndex">
+      <hkparam name="kneeIndex">13</hkparam>
+    </edit>
+    <edit path="#0885/legs/Element0/ankleIndex">
+      <hkparam name="ankleIndex">14</hkparam>
+    </edit>
+    <edit path="#0885/legs/Element0/isPlantedMS">
+      <hkparam name="isPlantedMS">false</hkparam>
+    </edit>
+  </replace>
 </patch>
 ```
 

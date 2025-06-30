@@ -1,545 +1,302 @@
-﻿using Pandora.MVVM.Data;
-using Avalonia.Collections;
-using Pandora.Command;
-using Pandora.Core;
-using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Threading.Tasks;
-using System;
-using System.Text;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
-using System.Linq;
-using System.IO;
-using System.Collections.Generic;
-using System.Globalization; 
-using System.Threading;
-using Pandora.Core.Engine.Configs;
-using System.Security.Policy;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia;
-using Pandora.API.Patch;
-using Pandora.API.Patch.Engine.Config;
-using System.Reflection;
-using System.Xml.Linq;
-using FluentAvalonia.UI.Controls;
-using Pandora.Views;
+﻿using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using DynamicData;
+using DynamicData.Binding;
+using Pandora.API.Patch.Engine.Config;
+using Pandora.Data;
+using Pandora.Models;
+using Pandora.Models.Patch.Configs;
+using Pandora.Services;
+using Pandora.Utils;
+using ReactiveUI;
+using ReactiveUI.SourceGenerators;
+using Splat;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Reactive;
+using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
+using System.Threading.Tasks;
 
+namespace Pandora.ViewModels;
 
-namespace Pandora.ViewModels
+public partial class EngineViewModel : ViewModelBase, IActivatableViewModel
 {
-    public class EngineViewModel : ViewModelBase
-    {
-        private readonly NemesisModInfoProvider nemesisModInfoProvider = new NemesisModInfoProvider();
-        private readonly PandoraModInfoProvider pandoraModInfoProvider = new PandoraModInfoProvider();
+	private static readonly NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+	private static readonly IReadOnlyList<IModInfoProvider> DefaultModProviders = new List<IModInfoProvider>
+	{
+		new NemesisModInfoProvider(),
+		new PandoraModInfoProvider()
+	}.AsReadOnly();
 
-        private HashSet<string> startupArguments = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ModService _modService;
+	private readonly JsonModSettingsStore _settingsStore;
+	private readonly EngineConfigurationService _configService;
+	private readonly DirectoryInfo launchDirectory = BehaviourEngine.AssemblyDirectory;
 
-		private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+	private bool autoRun = false;
+	private bool closeOnFinish = false;
+	private Task _preloadTask = Task.CompletedTask;
+	private DirectoryInfo currentDirectory = BehaviourEngine.SkyrimGameDirectory ?? BehaviourEngine.CurrentDirectory;
 
-		public bool? DialogResult { get; set; } = true;
-        private bool closeOnFinish = false;
-        private bool autoRun = false; 
-        public BehaviourEngine Engine { get; private set; } = new BehaviourEngine();
+	[Reactive] private bool _isPreloading;
+	[Reactive] private bool _isOutputFolderCustomSet;
+	[Reactive] private bool _isVisibleLinkOutputDirectory;
+	[Reactive] private string _logText = string.Empty;
+	[Reactive] private string _searchTerm = string.Empty;
+	[Reactive] private string _outputDirectoryMessage = string.Empty;
 
-        public RelayCommand LaunchCommand { get; }
-        public RelayCommand SetEngineConfigCommand { get; }
-        public RelayCommand ExitCommand { get; }
+	[ObservableAsProperty(ReadOnly = false)] private bool? _allSelected;
+	[ObservableAsProperty(ReadOnly = false)] private bool _engineRunning;
 
-        public RelayCommand ToggleAllCommand { get; }
+	[BindableDerivedList] private readonly ReadOnlyObservableCollection<ModInfoViewModel> _modViewModels;
 
-        private List<IModInfo> mods = new();
-		public List<IModInfo> Mods { 
-            get => mods; 
-            set
-            {
-                SetProperty(ref mods, value); 
-			}
-        }
-        private List<ModInfoViewModel> hiddenModViewModels = new();
-        private ObservableCollection<ModInfoViewModel> modViewModels = new(); 
-		public ObservableCollection<ModInfoViewModel> ModViewModels 
-        { 
-            get => modViewModels; 
-            set
-            {
-                SetProperty(ref modViewModels, value);
-            }
-        }
+	public string CurrentDirectoryInfo => currentDirectory.ToString();
+	public UIOptionsViewModel UIOptions { get; } = new();
+	public ViewModelActivator Activator { get; } = new();
+	public Interaction<AboutDialogViewModel, Unit> ShowAboutDialog { get; } = new();
+	public ObservableCollectionExtended<ModInfoViewModel> SourceMods { get; } = [];
+	public ObservableCollection<IEngineConfigurationViewModel> EngineConfigurationViewModels { get; } = [];
+	public BehaviourEngine Engine { get; private set; } = new();
 
-		public bool LaunchEnabled { get; set; } = true;
+	public EngineViewModel()
+	{
+		var rawArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
+		var options = LaunchOptions.Parse(rawArgs);
 
-		public string SearchBGText { get => searchBGText; set
-            {
-                SetProperty(ref searchBGText, value);
-            }
-        }
+		_settingsStore = new JsonModSettingsStore(Path.Combine(launchDirectory.FullName, AppConstants.ActiveModsPath));
+		_modService = new ModService(_settingsStore, DefaultModProviders);
+		_configService = new EngineConfigurationService();
 
-		private bool engineRunning = false;
-		public bool MenuEnabled 
-        { 
-            get => menuEnabled; 
-            private set
-            { 
-                SetProperty(ref menuEnabled, value);
-            } 
-        }
-		public bool EngineRunning
-        {
-            get => engineRunning; 
-            set
-            {
-                SetProperty(ref engineRunning, value); 
-            }
-        }
-        private FileInfo activeModConfig; 
+		EngineConfigurationViewModels = new ObservableCollection<IEngineConfigurationViewModel>(
+			_configService.GetInitialConfigurations(SetEngineConfigCommand));
 
-        private Dictionary<string, IModInfo> modsByCode = new Dictionary<string, IModInfo>();
+		SourceMods.ToObservableChangeSet()
+			.AutoRefresh(x => x.Priority)
+			.Filter(this.WhenAnyValue(x => x.SearchTerm)
+				.Throttle(AppConstants.SearchThrottle)
+				.ObserveOn(RxApp.MainThreadScheduler)
+				.Select(ModUtils.BuildFilter))
+			.Sort(SortExpressionComparer<ModInfoViewModel>.Ascending(x => x.Priority))
+			.Bind(out _modViewModels)
+			.Subscribe();
 
-        private bool modInfoCache = false;
-
-
-        private DirectoryInfo currentDirectory = BehaviourEngine.SkyrimGameDirectory ?? BehaviourEngine.CurrentDirectory;
-
-        private Task preloadTask;
-
-        private ObservableCollection<IEngineConfigurationViewModel> engineConfigs = new ObservableCollection<IEngineConfigurationViewModel>();
-		
-
-		public ObservableCollection<IEngineConfigurationViewModel> EngineConfigurationViewModels 
-        {
-            get => engineConfigs; 
-            set 
-            {
-                SetProperty(ref engineConfigs, value); 
-            } 
-        }
-        private IEngineConfigurationFactory engineConfigurationFactory;
-		private string logText = "";
-		public string LogText { 
-            get => logText;
-            set
-            {
-                SetProperty(ref logText, value); 
-            }
-        }
-        private string cachedSearchText = string.Empty;
-        private string searchText = "";
-		private string searchBGText = "Search";
-		private bool menuEnabled = false;
-
-		public string SearchText { get => searchText; 
-            set 
-            { 
-                
-                if (String.IsNullOrEmpty(value))
-                {
-					AssignModPriorities(Mods.Where(m => m.Active).ToList());
-					var sortedViewModels = ModViewModels.Concat(hiddenModViewModels).OrderBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList();
-					ModViewModels.Clear(); 
-                    hiddenModViewModels.Clear();
-                    foreach(var modViewModel in sortedViewModels)
-                    {
-                        ModViewModels.Add(modViewModel); 
-                    }
-					SearchBGText = cachedSearchText;
-                    cachedSearchText = string.Empty;
-				}
-                else
-                {
-					SearchBGText = string.Empty;
-					HashSet<ModInfoViewModel> foundMods = SearchModViewModels(value, ModViewModels).ToHashSet();
-					for (int i = ModViewModels.Count - 1; i >= 0; i--)
-					{
-						var modViewModel = ModViewModels[i];
-						if (foundMods.Contains(modViewModel))
-						{
-							continue;
-						}
-                        hiddenModViewModels.Add(modViewModel);
-						ModViewModels.RemoveAt(i);
-					}
-					foundMods = SearchModViewModels(value, hiddenModViewModels).ToHashSet();
-					for (int i = hiddenModViewModels.Count - 1; i >= 0; i--)
-					{
-						var modViewModel = hiddenModViewModels[i];
-						if (!foundMods.Contains(modViewModel))
-						{
-							continue;
-						}
-						ModViewModels.Add(modViewModel);
-						hiddenModViewModels.RemoveAt(i);
-					}
-				}
-                if (cachedSearchText.Length < value.Length)
-                {
-                    cachedSearchText = value;
-                }
-                SetProperty(ref searchText, value); 
-            } 
-        }
-
-		private static readonly char[] menuPathSeparators = new char[] { '/', '\\' };
-
-		public void SortMods()
+		this.WhenActivated(disposables =>
 		{
-            Mods = Mods.OrderBy(m => m.Code == "pandora").ThenBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList(); 
-		}
-		private IEnumerable<ModInfoViewModel> SearchModViewModels(string searchText, IEnumerable<ModInfoViewModel> modViewModels)
-        {
-            return modViewModels.Where(m => m.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+			HandleStartupArguments(options);
+			InitializeSubscriptions(disposables);
 
-		}
-        public EngineViewModel()
-        {
-            startupArguments = Environment.GetCommandLineArgs().ToHashSet(StringComparer.OrdinalIgnoreCase);
-            LaunchCommand = new RelayCommand(LaunchEngine, CanLaunchEngine);
-            ExitCommand = new RelayCommand(Exit);
-            SetEngineConfigCommand = new RelayCommand(SetEngineConfiguration, CanLaunchEngine);
-            ToggleAllCommand = new RelayCommand(ToggleSelectAll);
-
-            CultureInfo culture;
-
-			culture = CultureInfo.CreateSpecificCulture("en-US");
-
-			CultureInfo.DefaultThreadCurrentCulture = culture;
-			CultureInfo.DefaultThreadCurrentUICulture = culture;
-			CultureInfo.CurrentCulture = culture;
-			ReadStartupArguments();
-			activeModConfig = new FileInfo($"{currentDirectory}\\Pandora_Engine\\ActiveMods.txt");
-			preloadTask = Task.Run(Engine.PreloadAsync);
-			Engine.SetOutputPath(currentDirectory);
-			if (autoRun) { LaunchCommand.Execute(null); }
-
-
-		}
-        private void SetupExternalConfigurationPlugin(IEngineConfigurationPlugin injection)
-        {
-            if (string.IsNullOrEmpty(injection.MenuPath))
+			RxApp.MainThreadScheduler.Schedule(async () =>
             {
-                EngineConfigurationViewModels.Add(new EngineConfigurationViewModel(injection.Factory, SetEngineConfigCommand));
-                return;
-            }
+                await LoadModsAsync();
+                await PreloadEngineAsync();
 
-            string[] pathSegments = injection.MenuPath.Split(menuPathSeparators);
-            EngineConfigurationViewModelContainer? container = null;
-            int index = 0;
-			container = EngineConfigurationViewModels
-			    .Where(vm => vm.Name.Equals(pathSegments[index], StringComparison.OrdinalIgnoreCase)).FirstOrDefault()
-			    as EngineConfigurationViewModelContainer;
-			if (container == null)
-            {
-                container = new(pathSegments[index]);
-                EngineConfigurationViewModels.Add(container);
-            }
-			index++;
-			while (pathSegments.Length > index)
-			{
-				var tempContainer = container.NestedViewModels
-				.Where(vm => vm.Name.Equals(pathSegments[index], StringComparison.OrdinalIgnoreCase)).FirstOrDefault()
-as EngineConfigurationViewModelContainer;
-				if (tempContainer == null)
-				{
-					tempContainer = new EngineConfigurationViewModelContainer(pathSegments[index]);
-					container.NestedViewModels.Add(tempContainer);
-				}
-				container = tempContainer;
-                index++;
-			}
-            container.NestedViewModels.Add(new EngineConfigurationViewModel(injection.Factory, SetEngineConfigCommand));
-        }
-        private async Task SetupConfigurationOptions()
-        {
-            engineConfigurationFactory = new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimConfiguration>("Normal"), SetEngineConfigCommand);
+                if (autoRun) await LaunchEngineCommand.Execute();
+            });
+		});
 
-			EngineConfigurationViewModels.Add(
-                new EngineConfigurationViewModelContainer("Skyrim 64",
-                    new EngineConfigurationViewModelContainer("Behavior", 
-                        new EngineConfigurationViewModelContainer("Patch",
-                            (EngineConfigurationViewModel)engineConfigurationFactory,
-                            new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimDebugConfiguration>("Debug"), SetEngineConfigCommand)
-                        )
-                        //,
-                        //new EngineConfigurationViewModelContainer("Convert"
-                            
-                        //),
-                        //new EngineConfigurationViewModelContainer("Validate"
-                        //)
-					    )
-				    )
-                );
-            
-            foreach (var configPlugin in BehaviourEngine.EngineConfigurations)
-            {
-                SetupExternalConfigurationPlugin(configPlugin);
-            }
-            if (BehaviourEngine.EngineConfigurations.Count > 0)
-            {
-                await WriteLogBoxLine("Plugins loaded.");
-            }
-            MenuEnabled = true;
-			//EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimConfiguration>("Skyrim SE/AE", SetEngineConfigCommand));
-			//EngineConfigs.Add(new EngineConfigurationViewModel<SkyrimDebugConfiguration>("Skyrim SE/AE Debug", SetEngineConfigCommand));
-		}
-        public async Task LoadAsync()
-        {
-            var launchDirectory = BehaviourEngine.AssemblyDirectory.FullName;
-            ModViewModels.Clear(); 
-            Mods.Clear();
-            modsByCode.Clear();
-            var pluginsTask = SetupConfigurationOptions();
-            List<IModInfo> modInfoList;
-            {
-                HashSet<IModInfo> modInfos = new();
-
-                //Program folder
-                LoadModFolder(modInfos, await nemesisModInfoProvider?.GetInstalledMods(launchDirectory + "\\Nemesis_Engine\\mod")!);
-                LoadModFolder(modInfos, await pandoraModInfoProvider?.GetInstalledMods(launchDirectory + "\\Pandora_Engine\\mod")!);
-                //Working folder, or Skyrim\Data folder
-                LoadModFolder(modInfos, await nemesisModInfoProvider?.GetInstalledMods(BehaviourEngine.CurrentDirectory + "\\Nemesis_Engine\\mod")!);
-                LoadModFolder(modInfos, await pandoraModInfoProvider?.GetInstalledMods(BehaviourEngine.CurrentDirectory + "\\Pandora_Engine\\mod")!);
-                //Current (defaults to Working folder) or Output (set via -o) folder
-                LoadModFolder(modInfos, await nemesisModInfoProvider?.GetInstalledMods(currentDirectory + "\\Nemesis_Engine\\mod")!);
-                LoadModFolder(modInfos, await pandoraModInfoProvider?.GetInstalledMods(currentDirectory + "\\Pandora_Engine\\mod")!);
-
-                modInfoList = [.. modInfos];
-            }
-            modInfoList.ForEach(a => modsByCode.Add(a.Code, a));
-
-            modInfoCache = LoadActiveMods(modInfoList);
-
-            modInfoList = modInfoList.OrderBy(m => m.Code == "pandora").ThenBy(m => m.Priority == 0).ThenBy(m => m.Priority).ThenBy(m => m.Name).ToList();
-
-            foreach (var modInfo in modInfoList)
-            {
-                Mods.Add(modInfo);
-                ModViewModels.Add(new(modInfo)); 
-            }
-            await pluginsTask;
-			await WriteLogBoxLine("Mods loaded.");
-		}
-
-        private static void LoadModFolder(HashSet<IModInfo> modInfos, IList<IModInfo> mods) {
-            if (mods == null) { return; }
-
-            foreach (var mod in mods)
-            {
-                modInfos.Add(mod);
-			}
-        }
-
-        public void Exit(object? p)
-        {
-            //App.Current.MainWindow.Close();
-        }
-        internal async Task ClearLogBox() => LogText = "";
-        internal async Task WriteLogBoxLine(string text)
-        {
-            StringBuilder sb = new StringBuilder(LogText);
-            if (LogText.Length > 0) sb.Append(Environment.NewLine);
-            sb.Append(text);
-            LogText = sb.ToString();
-        }
-        internal async Task WriteLogBox(string text)
-        {
-            StringBuilder sb = new StringBuilder(LogText);
-            sb.Append(text);
-            LogText = sb.ToString();
-        }
-        private void ReadStartupArguments()
-        {
-            if (startupArguments.Remove("-skyrimDebug64"))
-            {
-                engineConfigurationFactory = new EngineConfigurationViewModel(new ConstEngineConfigurationFactory<SkyrimDebugConfiguration>("Debug"), SetEngineConfigCommand);
-                Engine = new BehaviourEngine(engineConfigurationFactory.Config);
-			}
-            if (startupArguments.Remove("-autoClose"))
-            {
-				closeOnFinish = true;
-			}
-            foreach(var arg in startupArguments)
-            {
-                if (arg.StartsWith("-o:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var argArr = arg.AsSpan();
-                    var pathArr = argArr.Slice(3);
-                    var path = pathArr.Trim().ToString();
-                    currentDirectory = new DirectoryInfo(path);
-                    continue;
-                }
-            }
-			if (startupArguments.Remove("-autorun"))
-			{
-				closeOnFinish = true;
-				autoRun = true;
-			}
-
-        }
-        private bool LoadActiveMods(List<IModInfo> loadedMods)
-        {
-            if (!activeModConfig.Exists) return false;
-            foreach(var mod in loadedMods) 
-            { 
-                if (mod == null) continue;
-                mod.Active = false;  
-            }
-            using (var readStream = activeModConfig.OpenRead())
-            {
-                using (var streamReader  = new StreamReader(readStream))
-                {
-					string? expectedLine;
-                    uint priority = 0; 
-                    while ((expectedLine = streamReader.ReadLine()) != null)
-                    {
-                        IModInfo? modInfo;
-                        if (!modsByCode.TryGetValue(expectedLine, out modInfo)) continue;
-                        priority++;
-                        modInfo.Priority = priority;
-                        modInfo.Active = true;
-                    }
-				}
-                
-                
-            }
-            return true;
-		}
-        private void SaveActiveMods(List<IModInfo> activeMods)
-        {
-			activeModConfig.Directory?.Create();
-			using (var writeStream = activeModConfig.Create())
-            {
-                using (StreamWriter streamWriter = new StreamWriter(writeStream)) 
-                { 
-                    foreach (var modInfo in activeMods)
-                    {
-                        streamWriter.WriteLine(modInfo.Code);
-                    }
-                }
-            }
-		}
-        public void AssignModPrioritiesFromViewModels(IEnumerable<ModInfoViewModel> modViewModels)
-        {
-            uint priority = 0;
-            foreach(var modViewModel in modViewModels)
-            {
-                priority++;
-                modViewModel.Priority = priority;
-            }
-        }
-        private List<IModInfo> AssignModPriorities(List<IModInfo> mods)
-        {
-            uint priority = 0;
-			foreach(var mod in mods)
-            {
-                priority++;
-                mod.Priority = priority; 
-            }
-
-            return mods; 
-        }
-
-        private List<IModInfo> GetActiveModsByPriority() => Mods.Where(m => m.Active).OrderBy(m => m.Code == "pandora").ThenBy(m => m.Priority == 0).ThenBy(m => m.Priority).ToList();
-		private async void SetEngineConfiguration(object? config)
+		if (BehaviourEngine.EngineConfigurations.Count > 0)
 		{
-			if (config == null) { return; }
-			engineConfigurationFactory = (IEngineConfigurationFactory)config;
-            await preloadTask;
-            var newConfig = engineConfigurationFactory.Config;
-			Engine = newConfig != null ? new BehaviourEngine(newConfig) : Engine;
-            Engine.SetOutputPath(currentDirectory);
-            preloadTask = Engine.PreloadAsync();
+			EngineLoggerAdapter.AppendLine("Plugins loaded.");
 		}
-        private async void ToggleSelectAll(object? isChecked)
-        {
-            bool check = (bool)isChecked!;
-            if (check)
-            {
-                foreach(var modViewModel in ModViewModels)
-                {
-                    modViewModel.Active = true; 
-                }
-            }
-            else
-            {
-				foreach (var modViewModel in ModViewModels)
-				{
-					modViewModel.Active = false;
-				}
-			}
-        }
-		private async void LaunchEngine(object? parameter)
-        {
-			lock (LaunchCommand)
+	}
+
+	private void HandleStartupArguments(LaunchOptions options)
+	{
+		if (options.OutputDirectory != null && options.OutputDirectory.Exists)
+		{
+			currentDirectory = options.OutputDirectory;
+			IsOutputFolderCustomSet = true;
+		}
+		else
+		{
+			bool fromMO2 = ProcessUtils.IsLaunchedFromModOrganizer();
+
+			IsVisibleLinkOutputDirectory = fromMO2;
+			OutputDirectoryMessage = fromMO2
+				? "Output folder not set via command line arguments (-o). If you use configured output folder via MO2 (Create files in mod ...), then ignore this."
+				: "Output folder is not set. Set it either via argument (-o). While the files will be generated in:";
+		}
+
+		autoRun = options.AutoRun;
+		closeOnFinish = options.AutoClose;
+
+		if (options.UseSkyrimDebug64)
+		{
+			var debugFactory = _configService.GetFactoryByType<SkyrimDebugConfiguration>();
+			if (debugFactory != null)
 			{
-				EngineRunning = true;
-				LaunchEnabled = !EngineRunning;
+				_configService.SetCurrentFactory(debugFactory);
 			}
-			
-            logText= string.Empty;
+		}
+	}
+	private void InitializeSubscriptions(CompositeDisposable disposables)
+	{
+		_engineRunningHelper = LaunchEngineCommand.IsExecuting
+			.ToProperty(this, x => x.EngineRunning)
+			.DisposeWith(disposables);
 
-			var configInfoMessage = $"Engine launched with configuration: {Engine.Configuration.Name}. Do not exit before the launch is finished.";
-			await WriteLogBoxLine(configInfoMessage);
-			await WriteLogBoxLine("Waiting for preload to finish.");
-			Stopwatch timer = Stopwatch.StartNew();
-			await preloadTask;
-            await WriteLogBoxLine("Preload finished.");
-            AssignModPrioritiesFromViewModels(ModViewModels); 
-			List<IModInfo> activeMods = GetActiveModsByPriority();
-            
-            IModInfo? baseModInfo = Mods.Where(m => m.Code == "pandora").FirstOrDefault();
+		_allSelectedHelper = SourceMods
+			.ToObservableChangeSet()
+			.AutoRefresh(x => x.Active)
+			.QueryWhenChanged(ModUtils.IsAllSelectedExceptPandora)
+			.DistinctUntilChanged()
+			.ToProperty(this, x => x.AllSelected)
+			.DisposeWith(disposables);
 
-            if (baseModInfo == null) { await WriteLogBoxLine("FATAL ERROR: Pandora Base does not exist. Ensure the engine was installed properly and data is not corrupted."); return; }
-			if (!baseModInfo.Active)
-			{
-				baseModInfo.Active = true;
-				activeMods.Add(baseModInfo);
-			}
-			baseModInfo.Priority = uint.MaxValue;
+		EngineLoggerAdapter.LogObservable
+			.ObserveOn(RxApp.MainThreadScheduler)
+			.Subscribe(text => LogText = text, ex => logger.Error(ex))
+			.DisposeWith(disposables);
 
-            bool success = false;
-			await Task.Run(async() => { success = await Engine.LaunchAsync(activeMods); }); 
-            
+		LaunchEngineCommand.ThrownExceptions.Subscribe(ex => this.Log().Error(ex)).DisposeWith(disposables);
+	}
 
-            timer.Stop();
+	private async Task PreloadEngineAsync()
+	{
+		if (IsPreloading)
+		{
+			await _preloadTask;
+			return;
+		}
 
-            logger.Info(configInfoMessage);
-			await WriteLogBoxLine(Engine.GetMessages(success));
-
-            if (!success)
-            {
-                await WriteLogBoxLine($"Launch aborted. Existing output was not cleared, and current patch list will not be saved.");
-            }
-            else
-            {
-				await WriteLogBoxLine($"Launch finished in {Math.Round(timer.ElapsedMilliseconds / 1000.0, 2)} seconds");
-				await Task.Run(() => { SaveActiveMods(activeMods); });
-
-                if (closeOnFinish) 
-                {
-					if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime) lifetime.Shutdown();
-				}
-			}
-            await WriteLogBoxLine(string.Empty);
-			var newConfig = engineConfigurationFactory.Config;
-            Engine = newConfig != null ? new BehaviourEngine(newConfig) : new BehaviourEngine();
-
+		IsPreloading = true;
+		try
+		{
+			var factory = _configService.GetCurrentFactory();
+			Engine = factory is not null ? new BehaviourEngine(factory.Config) : new BehaviourEngine();
 			Engine.SetOutputPath(currentDirectory);
-			preloadTask = Task.Run(Engine.PreloadAsync);
 
-			lock (LaunchCommand)
-            {
-				EngineRunning = false;
-				LaunchEnabled = !EngineRunning;
+			_preloadTask = Engine.PreloadAsync();
+			await _preloadTask;
+		}
+		finally
+		{
+			IsPreloading = false;
+		}
+	}
+	private async Task LoadModsAsync()
+	{
+		List<DirectoryInfo> searchDirectories =
+		[
+			launchDirectory,
+			BehaviourEngine.CurrentDirectory,
+			currentDirectory
+		];
+		DirectoryInfo[] uniqueDirectories = [.. searchDirectories
+			.Where(d => d != null)
+			.DistinctBy(d => d.FullName, StringComparer.OrdinalIgnoreCase)];
+		var mods = await _modService.LoadModsAsync([.. uniqueDirectories]);
+
+		RxApp.MainThreadScheduler.Schedule(() =>
+		{
+			SourceMods.Clear();
+			SourceMods.AddRange(mods);
+			EngineLoggerAdapter.AppendLine($"Mods loaded.");
+		});
+	}
+
+	private async Task WaitForPreloadAsync()
+	{
+		EngineLoggerAdapter.Clear();
+		EngineLoggerAdapter.AppendLine($"Engine launched with configuration: {Engine.Configuration.Name}. Do not exit before the launch is finished.");
+		EngineLoggerAdapter.AppendLine("Waiting for preload to finish...");
+		await _preloadTask;
+		EngineLoggerAdapter.AppendLine("Preload finished.");
+	}
+	private async Task<bool> ExecuteEngineAsync()
+	{
+		var activeMods = ModUtils.GetActiveModsByPriority(SourceMods);
+		bool success;
+
+		try
+		{
+			success = await Task.Run(() => Engine.LaunchAsync(activeMods));
+		}
+		catch (Exception ex)
+		{
+			logger.Error(ex, "Error during engine launch");
+			success = false;
+		}
+
+		return success;
+	}
+
+	private async Task HandleLaunchResultAsync(bool success)
+	{
+		if (success)
+		{
+			await _modService.SaveActiveModsAsync(SourceMods);
+			if (closeOnFinish && Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
+			{
+				lifetime.Shutdown();
 			}
+		}
+		else
+		{
+			EngineLoggerAdapter.AppendLine("Launch aborted. Existing output was not cleared, and current patch list will not be saved.");
+		}
+	}
 
-        }
+	[ReactiveCommand]
+	private async Task LaunchEngine()
+	{
+		var timer = Stopwatch.StartNew();
+		await WaitForPreloadAsync();
+		var success = await ExecuteEngineAsync();
+		timer.Stop();
+		EngineLoggerAdapter.AppendLine(Engine.GetMessages(success));
+		EngineLoggerAdapter.AppendLine($"Launch finished in {timer.Elapsed.TotalSeconds:F2} seconds.");
+		await HandleLaunchResultAsync(success);
+		_ = PreloadEngineAsync();
+	}
 
-        private bool CanLaunchEngine(object? parameter)
-        {
+	[ReactiveCommand]
+	private async Task SetEngineConfig(IEngineConfigurationFactory? factory)
+	{
+		if (factory is null || factory == _configService.GetCurrentFactory()) return;
 
-            return !EngineRunning;
-            
-        }
-    }
+		await _preloadTask;
+		_configService.SetCurrentFactory(factory);
+		await PreloadEngineAsync();
+	}
+
+	[ReactiveCommand]
+	private async Task ShowAboutDialogAsync() =>
+		await ShowAboutDialog.Handle(new AboutDialogViewModel());
+
+	[ReactiveCommand]
+	private async Task CopyTextAsync(string? text) =>
+		await AvaloniaServices.DoSetClipboardTextAsync(text);
+
+	[ReactiveCommand]
+	private async Task OpenUrlAsync(string url) =>
+		await AvaloniaServices.DoLaunchUriAsync(url);
+
+	[ReactiveCommand]
+	private void SortAscending(DataGridColumnHeader? header) =>
+		ModUtils.ApplySort(header, c => c.Sort(ListSortDirection.Ascending));
+
+	[ReactiveCommand]
+	private void SortDescending(DataGridColumnHeader? header) =>
+		ModUtils.ApplySort(header, c => c.Sort(ListSortDirection.Descending));
+
+	[ReactiveCommand]
+	private void ClearSort(DataGridColumnHeader? header) =>
+		ModUtils.ApplySort(header, c => c.ClearSort());
+
+	[ReactiveCommand]
+	private void ToggleSelectAll(bool? isChecked)
+	{
+		if (isChecked is not bool check) return;
+
+		ModUtils.SetAllModActiveStates(SourceMods, check);
+	}
 }

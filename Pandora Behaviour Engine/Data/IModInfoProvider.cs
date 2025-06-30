@@ -1,10 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using Pandora.API.Patch;
+using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
-using Pandora.Core;
-using Pandora.API.Patch;
-namespace Pandora.MVVM.Data;
+
+namespace Pandora.Data;
 
 public interface IModInfoProvider
 {
     public Task<List<IModInfo>> GetInstalledMods(string folderPath);
+	string SingleRelativePath { get; }
 }
