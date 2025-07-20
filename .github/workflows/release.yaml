@@ -17,7 +17,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # Ref: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net#building-and-testing-your-code
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -87,7 +86,6 @@ jobs:
             output-dir: Output.Linux-Musl-x64
 
     steps:
-      # Ref: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net#building-and-testing-your-code
       - uses: actions/checkout@v4
         with:
           submodules: recursive
