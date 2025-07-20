@@ -62,13 +62,14 @@ jobs:
       # NOTE: When attempting to build with `Pandora+.sln` during `PublishSingleFile`, an error occurs, so specify exe project.
       # - err msg: Publishing to a single file is only supported for executable applications.
       - name: Publish Self-Contained
+        shell: pwsh
         run: |
-          dotnet publish "./Pandora Behaviour Engine/Pandora Behaviour Engine.csproj" \
-            -c ${{ env.PROFILE }} \
-            -r ${{ matrix.rid }} \
-            -o "${{ github.workspace }}/${{ matrix.output-dir }}" \
-            --self-contained true \
-            /p:PublishSingleFile=true \
+          dotnet publish "./Pandora Behaviour Engine/Pandora Behaviour Engine.csproj" `
+            -c ${{ env.PROFILE }} `
+            -r ${{ matrix.rid }} `
+            -o "${{ github.workspace }}/${{ matrix.output-dir }}" `
+            --self-contained true `
+            /p:PublishSingleFile=true `
             /p:IncludeAllContentForSelfExtract=true
 
       - name: Zip and Release
