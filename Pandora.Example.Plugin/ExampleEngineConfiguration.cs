@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2023-2026 Pandora Behaviour Engine Contributors
+
+using Pandora.API.Patch.Engine.Config;
+
+namespace ExamplePlugin;
+
+public class ExampleEngineConfiguration : IEngineConfiguration
+{
+	public string Name { get; } = "Stuff";
+
+	public string Description { get; } = "Does some stuff.";
+
+	public Type PatcherType { get; } = typeof(ExamplePatcher);
+}

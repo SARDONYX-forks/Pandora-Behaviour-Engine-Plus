@@ -1,0 +1,125 @@
+name: bleeding edge preview
+
+on:
+  push:
+    branches:
+      - "preview"
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set output paths
+        id: set-paths
+        shell: pwsh
+        run: |
+          $output_dir='./Pandora.Engine/bin/Debug/net10.0'
+          echo "output_dir=$output_dir" >> $env:GITHUB_OUTPUT
+
+      - name: Build & Test -> Upload a Build Artifact
+        uses: ./.github/actions/build-and-test
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          configuration: Debug
+          solution-path: "./Pandora+.slnx"
+          output-dir: ${{ steps.set-paths.outputs.output_dir }}
+
+  publish-bleeding-edge:
+    if: github.event_name == 'push'
+    needs: build
+    permissions:
+      contents: read
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # needed for git describe
+
+      - name: Setup .NET & Cache Dependencies
+        uses: ./.github/actions/prepare-dotnet
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache-key-suffix: Release
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v4.1.0
+        with:
+          versionSpec: "6.3.x"
+
+      - name: Determine Version
+        id: version_step
+        uses: gittools/actions/gitversion/execute@v4.1.0
+
+      - name: Set preview version
+        id: preview_version
+        shell: pwsh
+        run: |
+          $short_sha = '${{ github.sha }}'.Substring(0, 7)
+          $version = "${{ steps.version_step.outputs.majorMinorPatch }}-preview-$short_sha"
+
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Set output paths
+        id: set_paths
+        shell: pwsh
+        run: |
+          $rid = 'win-x64'
+          $output_dir = '${{ github.workspace }}/Output.BleedingEdge'
+          $zip_file_name = "Pandora_Behaviour_Engine_Plus_Preview_${rid}_net.zip"
+          $zip_path = "$output_dir/$zip_file_name"
+
+          echo "rid=$rid" >> $env:GITHUB_OUTPUT
+          echo "output_dir=$output_dir" >> $env:GITHUB_OUTPUT
+          echo "zip_path=$zip_path" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Self-Contained
+        shell: pwsh
+        run: |
+          dotnet publish "./Pandora.Engine/Pandora.Engine.csproj" `
+            -c Release `
+            -r ${{ steps.set_paths.outputs.rid }} `
+            -o "${{ steps.set_paths.outputs.output_dir }}" `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeAllContentForSelfExtract=true `
+            /p:Version=${{ steps.version_step.outputs.fullSemVer }} `
+            /p:AssemblyVersion=${{ steps.version_step.outputs.assemblySemVer }} `
+            /p:FileVersion=${{ steps.version_step.outputs.assemblySemFileVer }} `
+            /p:InformationalVersion=${{ steps.preview_version.outputs.version }} `
+            /p:DebugType=none `
+            /p:DebugSymbols=false
+
+      - name: Create Zip
+        shell: pwsh
+        run: |
+          $outputDir = Resolve-Path '${{ steps.set_paths.outputs.output_dir }}'
+          $zipPath = '${{ steps.set_paths.outputs.zip_path }}'
+
+          Write-Host "Zipping from $outputDir => $zipPath"
+
+          Compress-Archive -Path "$outputDir/*" -DestinationPath "$zipPath"
+
+      - name: Upload to NexusMods
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.9
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ secrets.NEXUSMODS_GROUP_ID_BLD }}
+          filename: ${{ steps.set_paths.outputs.zip_path }}
+          display_name: Pandora Behaviour Engine Preview
+          version: ${{ steps.preview_version.outputs.version }}
+          show_requirements_pop_up: true
+          description: "Latest generated preview release. Use if you want/need unreleased features. May contain bugs."
+          category: optional

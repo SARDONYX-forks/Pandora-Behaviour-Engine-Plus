@@ -3,7 +3,10 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
-# Plugin-specific files 
+# .zed
+.zed/
+
+# Plugin-specific files
 [Pp]lugin.json
 
 # User-specific files
@@ -364,7 +367,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-/Pandora Behaviour Engine/Properties/launchSettings.json
+/Pandora.Engine/Properties/launchSettings.json
+/Pandora.Example.Plugin/Properties/launchSettings.json
 
-# Pandora Test Output 
-Pandora Test/Output
+# Pandora Test Output
+Pandora.Tests/Output
+.vscode/launch.json

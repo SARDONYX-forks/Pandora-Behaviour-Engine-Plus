@@ -1,0 +1,157 @@
+name: build & tests & release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-beta*"
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  PROFILE: Release # Release | Debug
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages # Since env cannot be specified in composite action, specify cache dir individually.
+
+jobs:
+  build:
+    permissions:
+      contents: write # Required for creating releases
+    runs-on: windows-latest
+    outputs:
+      fullSemVer: ${{ steps.version_step.outputs.fullSemVer }}
+      assemblySemVer: ${{ steps.version_step.outputs.assemblySemVer }}
+      assemblySemFileVer: ${{ steps.version_step.outputs.assemblySemFileVer }}
+      informationalVersion: ${{ steps.version_step.outputs.informationalVersion }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # 0 need for GitVersion
+
+      - name: Setup .NET & Cache Dependencies
+        uses: ./.github/actions/prepare-dotnet
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache-key-suffix: ${{ env.PROFILE }}
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v4.1.0
+        with:
+          versionSpec: "6.3.x"
+
+      - name: Determine Version
+        id: version_step
+        uses: gittools/actions/gitversion/execute@v4.1.0
+
+      - name: Set output paths
+        id: set_paths
+        shell: pwsh
+        run: |
+          $output_dir='${{ github.workspace }}/Pandora.Engine/bin/${{ env.PROFILE }}/net10.0'
+          $zip_file_name='Pandora_Behaviour_Engine_${{ github.ref_name }}.zip'
+          $zip_dir='${{ github.workspace }}/Output'
+
+          echo "output_dir=$output_dir" >> $env:GITHUB_OUTPUT
+          $zip_path="$zip_dir/$zip_file_name"
+          echo "zip_path=$zip_path" >> $env:GITHUB_OUTPUT
+
+      - name: Build & Test -> Upload a Build Artifact
+        uses: ./.github/actions/build-and-test
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          configuration: ${{ env.PROFILE }}
+          solution-path: "./Pandora+.slnx"
+          output-dir: ${{ steps.set_paths.outputs.output_dir }}
+
+      - name: Zip and Release
+        uses: ./.github/actions/zip-and-release
+        with:
+          title: Pandora Behaviour Engine ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
+          output-dir: ${{ steps.set_paths.outputs.output_dir }}
+          zip-path: ${{ steps.set_paths.outputs.zip_path }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    permissions:
+      contents: write # Required for creating releases
+    runs-on: ${{ matrix.runner }}
+    needs: build
+
+    strategy:
+      matrix:
+        include:
+          # Windows targets
+          - rid: win-x64
+            runner: windows-latest
+            output-dir: Output.Win-x64
+          - rid: win-x86
+            runner: windows-latest
+            output-dir: Output.Win-x86
+          - rid: win-arm64
+            runner: windows-latest
+            output-dir: Output.Win-Arm64
+
+          # Linux targets
+          # - rid: linux-x64
+          #   runner: windows-latest
+          #   output-dir: Output.Linux-x64
+          # - rid: linux-arm
+          #   runner: windows-latest
+          #   output-dir: Output.Linux-Arm
+          # - rid: linux-arm64
+          #   runner: windows-latest
+          #   output-dir: Output.Linux-Arm64
+          # - rid: linux-musl-x64
+          #   runner: windows-latest
+          #   output-dir: Output.Linux-Musl-x64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - name: Setup .NET & Cache Dependencies
+        uses: ./.github/actions/prepare-dotnet
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          cache-key-suffix: ${{ env.PROFILE }}
+
+      - name: Publish Self-Contained
+        shell: pwsh
+        run: |
+          dotnet publish "./Pandora.Engine/Pandora.Engine.csproj" `
+            -c ${{ env.PROFILE }} `
+            -r ${{ matrix.rid }} `
+            -o "${{ github.workspace }}/${{ matrix.output-dir }}" `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeAllContentForSelfExtract=true `
+            /p:Version=${{ needs.build.outputs.fullSemVer }} `
+            /p:AssemblyVersion=${{ needs.build.outputs.assemblySemVer }} `
+            /p:FileVersion=${{ needs.build.outputs.assemblySemFileVer }} `
+            /p:InformationalVersion=${{ needs.build.outputs.informationalVersion }} `
+            /p:DebugType=none `
+            /p:DebugSymbols=false
+
+      - name: Zip and Release
+        uses: ./.github/actions/zip-and-release
+        with:
+          # NOTE: The title is not provided here, so it will append to the existing release.
+          tag: ${{ github.ref_name }}
+          output-dir: ${{ matrix.output-dir }}
+          zip-path: "${{ matrix.output-dir }}/Pandora_Behaviour_Engine_${{ github.ref_name }}_${{ matrix.rid }}_net.zip"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to NexusMods
+        if: matrix.rid == 'win-x64'
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.9
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ secrets.NEXUSMODS_GROUP_ID }}
+          filename: "${{ matrix.output-dir }}/Pandora_Behaviour_Engine_${{ github.ref_name }}_${{ matrix.rid }}_net.zip"
+          display_name: Pandora Behaviour Engine ${{ github.ref_name }}
+          version: ${{ needs.build.outputs.fullSemVer }}
+          update_mod_version: true
+          primary_mod_manager_download: true
+          

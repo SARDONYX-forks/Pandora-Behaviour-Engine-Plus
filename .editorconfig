@@ -1,0 +1,13 @@
+root = true
+
+[*]
+indent_style = tab
+end_of_line = lf
+charset = utf-8
+
+# Ensure AnimData and AnimSet test files are always CRLF
+[Pandora.Skyrim/Pandora_Engine/**/*.txt]
+end_of_line = crlf
+
+[Pandora.Tests/Data/**/*.txt]
+end_of_line = crlf
